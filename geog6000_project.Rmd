@@ -1,0 +1,995 @@
+---
+title: "Data Analysis - Conflict Project"
+author: "David Leydet"
+date: "2022-10-22"
+output:
+  word_document:
+    toc: yes
+    toc_depth: '3'
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    theme: yeti
+---
+
+This project is an exploration of climate change and conflict in Pakistan. This project uses the following datasets:
+
+1. Pakistan Conflict Data - Acquired from the Armed Conflict Location and Event Data Project (ACLED) on 21SEP2022. See https://acleddata.com/terms-of-use/
+
+2. Regional Climate Data - ERA5 Dataset with monthly averaged temperature and precipitation data for January and July beginning in 2010 and ending in 2022. The spatial resolution is approximately 9 kilometers. Temperature data is calculated at 2m above the land surface. Precipitation data is total precipitation between forecast steps (monthly). Reanalysis model.  See https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land-monthly-means?tab=overview  
+
+3. Log Gross National Income Per Capital Variable - From: https://globaldatalab.org/shdi/metadata/lgnic/ 
+
+4. Population Data acquired on 07NOV2022 from: https://datacommons.org/place/country/PAK?utm_medium=explore&mprop=count&popt=Person&hl=en
+
+5. Pakistan Gross Domestic Product acquired on 07NOV2022  from: https://data.worldbank.org/indicator/NY.GDP.MKTP.CD?end=2021&locations=PK&start=2010
+
+
+# **Initial Data Setup**
+
+```{r Initial Setup - Working Directory and Library, message=FALSE}
+
+## Set working directory
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code")
+
+## Load packages we are using
+
+library(mapview) #mapping package
+library(raster) #raster data manipulation (Climate Data)
+library(RColorBrewer) #color palettes for visualization
+library(sf) #simple features for spatial data
+library(tmap) #mapping package
+library(viridis) #color palette for visualization
+library(ncdf4) #working with netCDF files (Climate Data)
+library(leaflet) #basemaps for mapview
+library(ggplot2) #better figures
+library(ggcorrplot) #Load the correlation plot package
+library(plotly) #interactive figures
+library(maps) #mapping 
+library(kableExtra) #creating better tables and outputs
+library(dplyr) #count and data functions
+library(reshape2) ## Package used to reformat data - wide to long
+library(tidyverse) ##Formatting dataframes, merge, and join
+library(stargazer) ##Formatting model outputs to tables
+
+```
+
+
+## **Pakistan Conflict Data**
+```{r Initial Data Read - Conflict Data}
+
+## Initial
+
+## Pakistan Conflict Data
+pak.con = read.csv("../data/conflict/pak_conflict.csv")
+
+## Change data to a factor
+
+#year don't set as a factor
+## pak.con$year = factor(pak.con$year)
+
+#interaction - this is the interaction code between actors (see ACLED codebook)
+pak.con$interaction = factor(pak.con$interaction)
+
+#inter1 - this is the type of actor for actor 1 (see ACLED codebook)
+pak.con$inter1 = factor(pak.con$inter1)
+
+#inter2 - this is the type of actor for actor 2(see ACLED codebook)
+pak.con$inter2 = factor(pak.con$inter2)
+
+
+```
+
+```{r Convert to Spatial Data - Conflict Data, message = FALSE}
+
+## Read in country shape file
+
+countries = st_read("../data/conflict/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp")
+
+## Read in administrative boundary shape file
+
+pak.bound = st_read("../data/conflict/pak_adm_wfp_20220909_shp/pak_admbnda_adm1_wfp_20220909.shp")
+
+pak.bound.adm2 = st_read("../data/conflict/pak_adm_wfp_20220909_shp/pak_admbnda_adm2_wfp_20220909.shp")
+
+## Set as a spatial feature for visualization
+pak.con.sf = st_as_sf(pak.con,
+                      coords = c("longitude", "latitude"),
+                      crs = 4326) #WGS84
+
+```
+
+
+```{r Water World Filter using DPLR}
+
+## Using grepl to subset based on keywords
+## keywords: water, rain, snow, river, flood
+## ArcPro's output for the definition query is ~4400. ***What is the delta??***
+
+
+pak.con.water.filter = dplyr::filter(pak.con.sf, grepl("water|flood|rain|river|snow", pak.con$notes, ignore.case = TRUE))
+
+str(pak.con.water.filter)
+
+```
+
+```{r Save Water Conflict Shapefile, warning = FALSE, eval = FALSE}
+
+pak.con.water.filter.sf = st_as_sf(pak.con.water.filter)
+st_write(pak.con.water.filter.sf,
+         dsn = "./figures/pak_water_con_sf.shp",
+         delete_layer = TRUE) ##Overrite the existing file
+
+
+```
+
+
+## **Initial Visualization Exploration**
+
+```{r Initial Visualization - Conflict Data}
+
+## Total events
+ggplot(pak.con.sf)  +
+  geom_sf(color = "firebrick3", alpha = 0.4)
+
+
+```
+
+```{r Initial Visualization - tmap}
+
+con.total.map = 
+  tm_shape(countries , bbox = st_bbox(pak.con.sf)) +
+  tm_borders(col = "gray") +
+  tm_shape(pak.con.sf) +
+  tm_symbols(col = "event_type", 
+             alpha = 0.4,
+             size = 0.2,
+             title.col = "Conflicts By Event Type") +
+   tm_layout(main.title = "Pakistan Conflicts: 2010 - 2022",
+            legend.outside = TRUE)
+
+con.total.map
+```
+
+```{r Map Save - Total Conflicts, message = FALSE, eval=FALSE}
+
+pdf("./figures/pak_conflict_total")
+con.total.map
+dev.off()
+
+```
+
+```{r Water Conflicts}
+
+con.water.map = 
+  tm_shape(countries , bbox = st_bbox(pak.con.sf)) +
+  tm_borders(col = "gray") +
+  tm_shape(pak.con.water.filter) +
+  tm_symbols(col = "event_type", 
+             alpha = 0.4,
+             size = 0.2,
+             title.col = "Water Conflicts By Event Type") +
+   tm_layout(main.title = "Pakistan Water Conflicts: 2010 - 2022",
+            legend.outside = TRUE)
+
+con.water.map
+
+```
+
+```{r By Year Look - Water Conflicts}
+
+water.con.by.year.map = 
+  tm_shape(countries , bbox = st_bbox(pak.con.sf)) +
+  tm_borders(col = "gray") +
+  tm_shape(pak.con.water.filter) +
+  tm_facets(by = "year") +
+  tm_symbols(col = "dodgerblue1", 
+             alpha = 0.5,
+             size = 0.2) +
+   tm_layout(main.title = "Pakistan Water Conflicts: 2010 - 2022",
+             main.title.size = 0.75,
+             legend.outside = FALSE,
+             legend.position = c("right", "bottom"))
+
+water.con.by.year.map
+
+
+```
+
+```{r Map Save - Water Conflict by Year, eval=FALSE, message=FALSE}
+
+pdf("./figures/pak_water_con_by_year")
+water.con.by.year.map
+dev.off()
+
+```
+
+```{r By Year Look - Conflict}
+
+con.by.year.map = 
+  tm_shape(countries , bbox = st_bbox(pak.con.sf)) +
+  tm_borders(col = "gray") +
+  tm_shape(pak.con.sf) +
+  tm_facets(by = "year") +
+  tm_symbols(col = "firebrick3", 
+             alpha = 0.5,
+             size = 0.2) +
+   tm_layout(main.title = "Pakistan Conflicts: 2010 - 2022",
+            legend.outside = TRUE)
+
+con.by.year.map
+
+```
+
+```{r Map Save - Conflict by Year, eval=FALSE, message=FALSE}
+
+pdf("./figures/pak_con_by_year")
+con.by.year.map
+dev.off()
+
+```
+
+```{r Visualize by fatlities - Conflict}
+
+# Subset to exclude 0 fatality events
+
+pak.con.sf.fat = subset(pak.con.sf, fatalities > 10)
+
+## NOT WORKING PROPERLY*****
+tm_shape(countries , bbox = st_bbox(pak.con.sf.fat)) +
+  tm_borders(col = "gray") +
+  tm_shape(pak.con.sf.fat) +
+  tm_symbols(col = "fatalities",
+             palette = "Reds",
+             alpha = 0.4,
+             title.col = "Number of Fatalities",
+             size = 0.2) +
+   tm_layout(main.title = "Pakistan Conflicts: 2010 - 2022",
+            legend.outside = TRUE) 
+   
+
+```
+
+
+```{r Pakistan Admin Level 1 Boundary Shapefile}
+
+tm_shape(pak.bound) +
+  tm_borders() +
+  tm_fill(col = "ADM1_EN",
+          title = "Pakistan Provinces")
+
+
+```
+
+```{r Mapping Conflict Across Pakistan and its Provinces}
+
+## Generate a new color palette
+mycol = turbo(n = 8, begin = 0.5, end = 1, direction = 1)
+
+con.by.district = 
+  tm_shape(pak.bound) +
+  tm_borders() +
+  tm_fill(col = "ADM1_EN",
+          title = "Pakistan Provinces") +
+  tm_shape(pak.con.sf.fat) +
+  tm_symbols(col = "fatalities",
+             palette = mycol,
+             alpha = 0.4,
+             title.col = "Number of Fatalities",
+             size = 0.2) +
+   tm_layout(main.title = "Pakistan Conflicts by Province: 2010 - 2022",
+            legend.outside = TRUE) +
+   tm_compass(position = c("left", "top"))
+
+con.by.district
+```
+
+
+```{r Map Save - Conflict by District, message = FALSE, eval=FALSE}
+
+pdf("./figures/con_by_district")
+con.by.district
+dev.off()
+
+```
+
+
+```{r Pakistan Admin Level 2 Boundary Shapefile, warning=FALSE}
+
+tm_shape(pak.bound.adm2) +
+  tm_borders() +
+  tm_fill(col = "ADM2_EN",
+          title = "Pakistan Divisions") +
+  tm_layout(legend.show = FALSE)
+
+
+```
+
+
+
+## **Initial Data Analysis**
+
+```{r Number of Conflicts by Year, warning=FALSE}
+
+## Create the counts by year
+
+year.2022 = as.numeric(nrow(filter(pak.con, year == 2022)))
+year.2021 = as.numeric(nrow(filter(pak.con, year == 2021)))
+year.2020 = as.numeric(nrow(filter(pak.con, year == 2020)))
+year.2019 = as.numeric(nrow(filter(pak.con, year == 2019)))
+year.2018 = as.numeric(nrow(filter(pak.con, year == 2018)))
+year.2017 = as.numeric(nrow(filter(pak.con, year == 2017)))
+year.2016 = as.numeric(nrow(filter(pak.con, year == 2016)))
+year.2015 = as.numeric(nrow(filter(pak.con, year == 2015)))
+year.2014 = as.numeric(nrow(filter(pak.con, year == 2014)))
+year.2013 = as.numeric(nrow(filter(pak.con, year == 2013)))
+year.2012 = as.numeric(nrow(filter(pak.con, year == 2012)))
+year.2011 = as.numeric(nrow(filter(pak.con, year == 2011)))
+year.2010 = as.numeric(nrow(filter(pak.con, year == 2010)))
+
+## Create a new data frame for the counts
+
+# vector of years
+
+years = c("2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022")
+
+# vector of years as a number for plotting purposes
+years.num = seq(from = 2010, to = 2022, by = 1)
+
+# vector of conflict counts
+
+num.conflicts = c(year.2010, year.2011, year.2012, year.2013, year.2014, year.2015, year.2016, year.2017, year.2018, year.2019, year.2020, year.2021, year.2022)
+
+# Combine the vectors into a data frame
+
+con.by.year = data.frame (years, num.conflicts)
+
+# Combine the vectors using the years as a number
+
+con.by.year.num = data.frame(years.num, num.conflicts)
+
+# Visualize the Count
+# How does one add a trendline?
+
+num.conflicts.sctrplot =
+  ggplot(data = con.by.year.num, aes(x = years.num, y = num.conflicts)) +
+  geom_point(shape = 18, size = 3, color = "red") +
+  geom_smooth(method = lm,
+              se = FALSE) +
+  xlab("Year") +
+  ylab("Number of Conflicts") +
+  labs(title = "Pakistan Conflicts by Year") +
+  scale_x_discrete(limits = c(years.num)) +
+  theme_bw() 
+
+num.conflicts.sctrplot
+```
+
+```{r Scatter Plot Save - Conflict by Year, message = FALSE, eval=FALSE}
+
+pdf("./figures/con_by_year_scatterplot")
+num.conflicts.sctrplot
+dev.off()
+
+```
+
+
+```{r Number of Water Conflicts by Year}
+
+##Count the number of water conflicts by year
+water.year.2022 = as.numeric(nrow(filter(pak.con.water.filter, year == 2022)))
+water.year.2021 = as.numeric(nrow(filter(pak.con.water.filter, year == 2021)))
+water.year.2020 = as.numeric(nrow(filter(pak.con.water.filter, year == 2020)))
+water.year.2019 = as.numeric(nrow(filter(pak.con.water.filter, year == 2019)))
+water.year.2018 = as.numeric(nrow(filter(pak.con.water.filter, year == 2018)))
+water.year.2017 = as.numeric(nrow(filter(pak.con.water.filter, year == 2017)))
+water.year.2016 = as.numeric(nrow(filter(pak.con.water.filter, year == 2016)))
+water.year.2015 = as.numeric(nrow(filter(pak.con.water.filter, year == 2015)))
+water.year.2014 = as.numeric(nrow(filter(pak.con.water.filter, year == 2014)))
+water.year.2013 = as.numeric(nrow(filter(pak.con.water.filter, year == 2013)))
+water.year.2012 = as.numeric(nrow(filter(pak.con.water.filter, year == 2012)))
+water.year.2011 = as.numeric(nrow(filter(pak.con.water.filter, year == 2011)))
+water.year.2010 = as.numeric(nrow(filter(pak.con.water.filter, year == 2010)))
+
+##Automate this: function script?
+##Function Works!
+##Automate loop??
+
+mycountbyyear = function(x) {
+  as.numeric(nrow(filter(x, year == 2010)))
+}
+
+testyear = mycountbyyear(pak.con.water.filter)
+
+
+##Create a vector of water conflicts by year
+water.num.conflicts = c(water.year.2010, water.year.2011, water.year.2012, water.year.2013, water.year.2014, water.year.2015, water.year.2016, water.year.2017, water.year.2018, water.year.2019, water.year.2020, water.year.2021, water.year.2022)
+
+# Combine the vectors into a data frame. Need to use years.num in order to plot a trend line
+
+water.con.by.year = data.frame (years.num, water.num.conflicts)
+
+##Plot it!
+
+num.water.conflicts.sctrplot =
+  ggplot(data = water.con.by.year, aes(x = years.num, y = water.num.conflicts)) +
+  geom_point(shape = 18, size = 3, color = "blue") +
+  geom_smooth(method = NULL,
+              se = TRUE,
+              color = "black",
+              linetype = "dashed",
+              size = 0.5) +
+  xlab("Year") +
+  ylab("Number of Water Conflicts") +
+  labs(title = "Pakistan Water Conflicts by Year") +
+  scale_x_discrete(limits = c(years.num)) +
+  theme_bw() 
+
+num.water.conflicts.sctrplot
+
+
+```
+
+
+```{r Scatter Plot Save - Water Conflict by Year, message = FALSE, eval=FALSE}
+
+pdf("./figures/water_con_by_year_scatterplot")
+num.water.conflicts.sctrplot
+dev.off()
+
+```
+
+
+## **Pakistan GNI Data**
+
+```{r Initial Data Read - GNI}
+
+## Initial Read
+## ****Note - the years are from 1990 - 2019****
+## Log Gross National Income per capita in thousands of US Dollars (2011 PPP) 
+
+## Ask Simon about time series data
+
+pak.gni = read.csv("../data/conflict/pak_subnat_gdp.csv")
+
+## Convert it from wide format to long format
+pak.gni.long = melt(pak.gni, id.vars = "Region")
+
+## Change the column name to year
+colnames(pak.gni.long)[2] = "year" 
+
+## Remove the "x" from the years
+pak.gni.long$year = gsub("X", "", as.factor(pak.gni.long$year))
+
+## Subset the temporal timeframe: 2010 - 2022 (2019 in this case)
+
+###pak.gni.time.subset = subset(pak.gni.long, Factor == "2010")
+
+
+
+```
+
+
+```{r GNI Visualization}
+
+pak.gni.plot = 
+  ggplot(data = pak.gni.long, aes(x = year, y = value, color = Region)) +
+  geom_point() +
+  xlab("Year") +
+  ylab("GNI per Capita (Thousands USD)") +
+  # xlim(2010, 2019) +
+  theme(axis.text.x = element_text(angle = 90))
+  theme_bw()
+  
+
+pak.gni.plot
+
+
+```
+
+```{r GNI Timeseries Plot Save, message = FALSE}
+
+## Save as a .pdf
+ggsave("./figures/gni_by_year_district.pdf", pak.gni.plot)
+
+
+```
+
+
+```{r Initial Pakistan GDP Read}
+
+##2022 GDP has not been published yet, so we estimated based on an average gdp growth of 3.7%
+
+pak.gdp = read.csv("../data/conflict/pak_gdp_2010_2022.csv")
+
+pak.gdp.plot = 
+  ggplot(data = pak.gdp, aes(x = year, y = gdp)) +
+  geom_point(col = "forestgreen") +
+  geom_line(linetype = "dashed",
+            col = "forestgreen") +
+  labs(title = "Pakistan GDP (2010-2022)") +
+  xlab("Year") +
+  ylab("GDP USD($)")
+
+pak.gdp.plot
+#May want to scale the GDP
+
+```
+
+```{r Scatter Plot Save - Pakistan GDP, message = FALSE, eval=FALSE}
+
+pdf("./figures/pak_gdp_by_year")
+pak.gdp.plot
+dev.off()
+
+```
+
+## **Pakistan Climate Data**
+
+### **Temperature Data**
+
+```{r Initial Data Read - Climate: Temperature }
+
+## Read in the ERA5 climate data
+
+pak.temp = raster("../data/conflict/pak_clim.nc", varname = "t2m")
+
+## Look at the data
+##26 bands (layers)
+##13 years worth of data * 2 months(Jan, Jul) = 26 observations (bands?)
+
+## Syntax variable = raster("filepath", band = #) to extract the specific band you need
+
+## library(ncdf4) this package allows you to read into the metadata
+## Could use stack() to look at all of the bands
+
+pak.temp
+
+## CRS Check
+## Coordinate Reference System:
+## Deprecated Proj.4 representation: +proj=longlat +datum=WGS84 +no_defs 
+
+
+```
+
+
+```{r Initial Temperature Visualization}
+
+## Temperature is in Kelvin (how do I convert the scale to Celsius? Kelvin Temp - 273.15)
+## January Temperature. How to plot July?
+
+mytemp.pal = brewer.pal(n = 9, name = "OrRd")
+
+plot(pak.temp, 
+     main = "January Temperature - 2010",
+     col = mytemp.pal)
+plot(st_geometry(pak.bound),
+     border = "black",
+     add = TRUE)
+
+
+
+```
+
+
+
+```{r Masking Visualization - Test}
+
+##Not working correctly now? 20221107
+pak.temp.masked = mask(pak.temp, mask = pak.bound)
+
+plot(pak.temp.masked,
+     main = "Pakistan Jan 2010 Temperature - Masked",
+     col = mytemp.pal)
+plot(st_geometry(pak.bound), add = TRUE)
+
+
+```
+
+```{r Temperature Data Extraction - Stack}
+
+##Use stack() to load all of the temperature bands
+
+temp.stack = stack("../data/conflict/pak_clim.nc", varname = "t2m")
+
+##View the stack data
+temp.stack
+
+```
+
+
+```{r Temperature Data Stack Subset}
+
+##January 2010 stack
+temp.stack.jan2010 = temp.stack[[1]]
+
+temp.stack.jan2010
+
+```
+
+```{r Crop the Stack by Pakistan}
+
+##Crop the temperature stack by the Pakistan Boundary
+
+temp.stack.crop = crop(temp.stack, pak.bound)
+
+temp.stack.crop
+
+```
+
+
+```{r Temperature Stack Visualization}
+##Color Template for Temperature
+
+
+##Create a function to add the Pakistan Level 2 boundaries to the figure
+addborder = function(){
+  plot(as_Spatial(pak.bound), 
+       add = TRUE)
+}
+
+plot(temp.stack.crop[[1]],
+     col = mytemp.pal,
+     zlim = c(250, 320), ##zlim makes sure the scale is the same
+     addfun = addborder)
+
+
+```
+
+
+
+```{r Mask the Stack for Pakistan}
+
+pak.temp.stack.mask = mask(temp.stack, mask = pak.bound)
+
+plot(pak.temp.stack.mask,
+     col = mytemp.pal,
+     zlim = c(250, 320), ##zlim makes sure the scale is the same
+     addfun = addborder)
+
+```
+
+
+```{r Temperature Stack Mean Temperature}
+
+##Use the temperature stack (masked) to calculate the mean average temperature for the country
+
+temp.avg.all = cellStats(pak.temp.stack.mask, mean)
+
+##Visualize the data - this differs slighlt from running the entire raster data (without the mask)
+#plot(temp.avg.all,
+     #type = "p")
+
+temp.avg.all
+
+##Shape the average temperature values into a data frame
+temp.avg.df = as.data.frame(temp.avg.all)
+
+temp.avg.df
+
+```
+
+
+```{r Write to CSV - Temperature Average, eval=FALSE}
+
+##Write to csv to transform....need to find a better way to do this!!!!***
+write.csv(temp.avg.df,
+          "../data/conflict/pak_avg_temp")
+
+
+```
+
+
+```{r Temperature Read Converted csv}
+##Read in the converted csv
+
+pak.temp.avg = read.csv("../data/conflict/pak_avg_temp_converted.csv")
+
+pak.temp.avg
+
+```
+
+```{r Temperature Trend Visualization}
+
+avg.temp.plot =
+  ggplot(data = pak.temp.avg) +
+  geom_line(aes(x=year, y = avg_jan_celsius), col = "blue") +
+   geom_line(aes(x=year, y = avg_jul_celsius), col = "red") +
+  xlab("Year") +
+  ylab("Temperature (Celsius)")
+
+
+avg.temp.plot
+
+```
+
+
+### **Precipitation Data**
+
+
+```{r Initial Data Read - Climate: Precipitation }
+
+## Read in the ERA5 climate data
+## Value is in meters
+
+##26 bands (layers)
+##13 years worth of data * 2 months(Jan and Jul) = 26 observations (bands?)
+
+## Syntax variable = raster("filepath", band = #) to extract the specific band you need
+
+## library(ncdf4) this package allows you to read into the metadata
+## Could use stack() to look at all of the bands
+
+pak.precip = raster("../data/conflict/pak_clim.nc", varname = "tp")
+
+## Look at the data
+
+pak.precip
+
+
+```
+
+
+```{r Initial Precipitation Visualization}
+
+##January precipitation
+myprecip.pal = brewer.pal(n = 9, name = "Blues")
+plot(pak.precip, 
+     main = "January Precipitation - 2010",
+     col = myprecip.pal)
+plot(st_geometry(pak.bound.adm2), 
+     border = "black",
+     add = TRUE)
+
+
+```
+
+
+```{r Precipitation Data Extraction - Stack}
+
+##Use stack() to load all of the precipitation bands
+##REMINDER This is total precipitation in meters
+
+
+precip.stack = stack("../data/conflict/pak_clim.nc", varname = "tp")
+
+##View the stack data
+precip.stack
+
+```
+
+```{r Precip Mask the Stack for Pakistan}
+
+pak.precip.stack.mask = mask(precip.stack, mask = pak.bound)
+
+plot(pak.precip.stack.mask,
+     col = myprecip.pal,
+     zlim = c(0, 0.0030), ##zlim makes sure the scale is the same
+     addfun = addborder)
+
+```
+
+
+```{r Precip Stack Mean}
+
+##Use the precipitation stack (masked) to calculate the mean average temperature for the country
+
+precip.avg.all = cellStats(pak.precip.stack.mask, mean)
+
+##Visualize the data - this differs slighlt from running the entire raster data (without the mask)
+#plot(precip.avg.all,
+     #type = "p")
+
+precip.avg.all
+
+##Shape the average temperature values into a data frame
+precip.avg.df = as.data.frame(precip.avg.all)
+
+precip.avg.df
+
+```
+
+
+```{r Write to CSV - Precipitation Average, eval=FALSE}
+
+##Write to csv to transform....need to find a better way to do this!!!!***
+write.csv(precip.avg.df,
+          "../data/conflict/pak_avg_precip")
+
+
+```
+
+
+```{r Precipitation Read Converted csv}
+##Read in the converted csv
+
+pak.precip.avg = read.csv("../data/conflict/pak_avg_precip_converted.csv")
+
+pak.precip.avg
+
+```
+
+
+```{r Precipitation Trend Visualization}
+
+avg.precip.plot =
+  ggplot(data = pak.precip.avg) +
+  geom_line(aes(x=year, y = avg_jan_precip_mm, color = "avg_jan_precip")) +
+   geom_line(aes(x=year, y = avg_jul_precip_mm, color = "avg_jul_precip")) +
+  xlab("Year") +
+  ylab("Total Precipitation (mm)") +
+  scale_color_manual(name = "Seasonal Precipitation",
+                     values = c("avg_jan_precip" = "blue", 
+                                "avg_jul_precip" = "red"))
+
+
+avg.precip.plot
+
+```
+
+## **Population Data**
+
+```{r Read Population Data}
+
+##Data acquired from datacommons.org (world bank)
+##2022 is estimated based on the 10-year average growth rate
+
+
+pak.pop = read.csv("../data/conflict/pak_pop.csv")
+
+ggplot(data = pak.pop, aes(x = year, y = pak_pop)) +
+  geom_point(col = "darkorange2") +
+  geom_line(linetype = "dashed",
+            col = "darkorange2") +
+  labs(title = "Pakistan Population (2010-2022)") +
+  xlab("Year") +
+  ylab("Population")
+
+
+```
+
+
+
+# **Models Build**
+
+```{r Create a New Data Frame - National Model}
+
+##Test: Merge the GDP and Number of Conflicts together
+
+##Change the column header in order to merge
+colnames(con.by.year)[1] = "year"
+
+##Merge
+pak.model.df = merge(con.by.year, pak.gdp, by = "year")
+##It worked!
+
+##Add water conflicts 
+##use by.x and by.y to merge using different variable names
+pak.model.df = merge(pak.model.df, water.con.by.year, by.x ="year", by.y = as.character("years.num"))
+
+##Now to add population
+pak.model.df = merge(pak.model.df, pak.pop, by = "year")
+
+
+##Convert year to number
+
+pak.model.df$year = as.numeric(pak.model.df$year)
+
+##Merge temperature data
+
+pak.model.df = merge(pak.model.df, pak.temp.avg, by = "year")
+
+##Merge precipitation data
+
+pak.model.df = merge(pak.model.df, pak.precip.avg, by = "year")
+
+
+
+```
+
+
+```{r Write to CSV - Conflict Model Dataframe, eval=FALSE}
+
+##Write to csv to save***
+write.csv(pak.model.df,
+          "../data/conflict/pak_model_df")
+
+
+```
+
+
+```{r Correlation Matrix - National}
+
+#pairs(pak.model.df)
+
+ggcorrplot(cor(pak.model.df), 
+           method = "square",
+           type = "lower",
+           lab = TRUE,
+           colors = c("blue", "darksalmon", "firebrick"))
+           #p.mat = cor_pmat(pak.model.df)) #x out non-significant p-values
+
+```
+
+
+## **OLS LM**
+
+```{r OLS LM Build}
+
+pak.nat.lm = lm(num.conflicts ~ year + gdp + pak_pop + avg_jan_celsius + avg_jul_celsius + avg_jan_precip_mm + avg_jul_precip_mm,
+                data = pak.model.df)
+
+summary(pak.nat.lm)
+
+```
+
+
+## **GLM - Poisson**
+
+```{r Model Build - National}
+
+##Starting with a generalized linear model - Poisson - as the number of conflicts is count data
+## Try running it without year
+## Running the Z-score for the variables (the interpretation would be the change in one standard deviation) - use function scale()
+
+pak.nat.glm = glm(num.conflicts ~ year + gdp + pak_pop + avg_jan_celsius + avg_jul_celsius + avg_jan_precip_mm + avg_jul_precip_mm,
+              family = poisson(link = 'log'),
+              data = pak.model.df)
+
+summary(pak.nat.glm)
+
+##Need to transform the coefficients 
+```
+
+```{r Stargazer Conversion Model Output Table}
+##Create a variable to store the model summary
+
+#pak.nat.glm.sum = summary(pak.nat.glm)
+
+#stargazer(pak.nat.glm.sum, type = "html", style = "all")
+
+```
+
+
+```{r Transform the Coefficients}
+
+##Coefficient transformation as the output is in the log values (link = log)
+##Reminder Interpretation Note:
+##Log odds scale to odds scale - it becomes multiplicative - a rate of change (bigger than 1 it is a positive change, if it is less than 1 it is a negative change)
+##Scale the gdp coefficient and population
+
+pak.nat.glm.coef = exp(coef(pak.nat.glm))
+pak.nat.glm.coef
+
+
+```
+
+### **Residuals**
+
+```{r Residual Visualization}
+
+##View the residuals
+
+plot(residuals.glm(pak.nat.glm))
+abline(h = 0, col = "red")
+
+##Fitting a spline may be better for this model?
+```
+
+
+```{r Model Plot}
+
+plot(pak.nat.glm)
+
+
+```
+
+
+
+
+
+
+
+
