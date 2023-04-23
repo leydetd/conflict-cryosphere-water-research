@@ -1,0 +1,1854 @@
+---
+title: "Pak_Conflict_Zonal_Stat_Test"
+author: "David Leydet"
+date: "2023-03-12"
+output: 
+ html_document:
+   toc: yes
+   toc_depth: 3
+   theme: yeti
+   toc_float: yes
+---
+
+
+# **Initial Setup** 
+
+```{r Initial Setup}
+##Set working directory
+##r code is the same level as data
+##data has the following subfolders - conflict, IPUMS, NASA HiMAT, population, Suicide, and Water Basins
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code")
+
+
+```
+
+```{r Package install}
+
+```
+
+
+```{r Libraries, message=FALSE}
+
+
+library(mapview) #mapping package
+library(raster) #raster data manipulation (Climate Data)
+library(RColorBrewer) #color palettes for visualization
+library(sf) #simple features for spatial data
+library(tmap) #mapping package
+library(viridis) #color palette for visualization
+library(ncdf4) #working with netCDF files (Climate Data)
+library(leaflet) #basemaps for mapview
+library(ggplot2) #better figures
+library(ggcorrplot) #Load the correlation plot package
+library(plotly) #interactive figures
+library(maps) #mapping 
+library(kableExtra) #creating better tables and outputs
+library(dplyr) #count and data functions
+library(reshape2) ## Package used to reformat data - wide to long
+library(tidyverse) ##Formatting dataframes, merge, and join
+library(stargazer) ##Formatting model outputs to tables
+library(pscl) ##Used to calculate pseudo r^2 values for log regression models (poisson)
+library(janitor) ##Used to count/provide summaries for dataframes
+library(jtools) ##Used to produce aesthetically pleasing model output tables
+library(huxtable) ##Used in conjunction with jtools to export model outputs
+library(flextable) ##Needed to knit. linked to the janitor library
+library(geomerge) ##Merges conducts a series of spatial joins to combine geospatial data ##Andrew Linke recommendation!!
+library(tidyr) ##reshaping data formats long/wide
+library(lubridate) ##Helps dealing with date/time ##Needed for geomerge
+library(caret) ##min/max scaling pre-process
+
+
+```
+
+
+# **Pakistan Shape Files**
+
+```{r Pakistan Shape Files, message=FALSE}
+
+## Read in country shape file
+
+countries = st_read("../data/conflict/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp", quiet = TRUE)
+
+## Read in administrative boundary (level 0) shape file
+
+pak.bound = st_read("../data/conflict/pak_adm_wfp_20220909_shp/pak_admbnda_adm0_wfp_20220909.shp", quiet = TRUE)
+
+## Read in the districts (level 2) shape file
+
+pak.bound.adm2 = st_read("../data/conflict/pak_adm_wfp_20220909_shp/pak_admbnda_adm2_wfp_20220909.shp", quiet = TRUE)
+
+## Read in the city shapefile
+
+pak.bound.city = st_read("../data/shapefiles/Study Districts Test.shp", quiet = TRUE)
+
+```
+
+
+```{r Subset Shapefiles}
+## Subset the admin2 shapefile by city
+## Create a vector concatenating all of the districts of karachi
+karachi = c("East Karachi", "South Karachi", "West Karachi", "Central Karachi", "Korangi Karachi")
+
+##Create a shapefile for each karachi
+ek = pak.bound.adm2[pak.bound.adm2$ADM2_EN == "East Karachi", ]
+sk = pak.bound.adm2[pak.bound.adm2$ADM2_EN == "South Karachi", ]
+wk = pak.bound.adm2[pak.bound.adm2$ADM2_EN == "West Karachi", ]
+ck = pak.bound.adm2[pak.bound.adm2$ADM2_EN == "Central Karachi", ]
+kk = pak.bound.adm2[pak.bound.adm2$ADM2_EN == "Korangi Karachi", ]
+
+## Merge them
+##karachi = st_union(ek, sk)
+
+##karachi = st_union(karachi, wk)
+
+##karachi = st_union(karachi, ck)
+
+##karachi = st_union(karachi, kk)
+
+
+## Drop unnecessary columns
+##karachi = karachi[ , c(1:14, 71)]
+
+## Check
+tm_shape(pak.bound.city) +tm_fill(col = "blue") + tm_shape(pak.bound) + tm_borders()
+                           
+                           
+##cities = pak.bound.adm2[pak.bound.adm2$ADM2_EN %in% c("Quetta", "Lahore", "Peshawar"),]
+
+## Check
+##cities
+
+## Bind karachi together
+#cities = rbind(cities, karachi)
+
+
+```
+
+```{r Sort Shapefile Alphabetically}
+## **NOTE** The shapefile is originally ordered by the object ID, not the ADM2_EN name***
+
+
+## Order the pak.bound.adm2 boundaries alphabetically by their English name
+pak.bound.adm2 = pak.bound.adm2[order(pak.bound.adm2$ADM2_EN) , ]
+
+## Check
+head(pak.bound.adm2)
+
+```
+
+# **Test Dataframe**
+
+**Note:** This is the dataframe that we will collate all of the separate data/observations to. This dataframe consists of 160 rows for each district in Pakistan. The variables/features are extracted by district, then added as a feature to the test.df. Finally, the test.df is pivoted to a long format data frame for analysis. See the **"Build the Overall Dataframe** section of this document. 
+
+```{r Build New Df}
+## Build a new dataframe to put values in
+
+test.df = data.frame(matrix(nrow = 160, ncol = 0))
+
+## Add names to the dataframe
+
+test.df$districts = pak.bound.adm2$ADM2_EN
+
+
+## Check
+str(test.df)
+head(test.df)
+```
+
+# **Conflict Data**
+
+```{r Conflict Data Read}
+
+##Read in the ACLED Data
+
+pak.con = read.csv("../data/conflict/run_2/pak_2010_2022.csv")
+
+##Factor conversion for districts
+##Is this needed?
+
+#pak.con.v2 = pak.con
+
+#pak.con.v2$admin2 = as.factor(pak.con.v2$admin2)
+
+##Check
+#str(pak.con.v2$admin2)
+
+## Note - Consider a pipeline approach to data cleaning/aggregation**
+
+```
+
+```{r Pakistan Conflict Data - SF}
+
+pak.con.sf = st_as_sf(pak.con,
+                      coords = c("longitude", "latitude"),
+                      crs = 4326) #WGS84
+
+```
+
+
+```{r Separate the Conflict Data}
+## Separate by years
+pak.con.2010 = pak.con.sf[pak.con.sf$year == "2010", ]
+pak.con.2011 = pak.con.sf[pak.con.sf$year == "2011", ]
+pak.con.2012 = pak.con.sf[pak.con.sf$year == "2012", ]
+pak.con.2013 = pak.con.sf[pak.con.sf$year == "2013", ]
+pak.con.2014 = pak.con.sf[pak.con.sf$year == "2014", ]
+pak.con.2015 = pak.con.sf[pak.con.sf$year == "2015", ]
+pak.con.2016 = pak.con.sf[pak.con.sf$year == "2016", ]
+pak.con.2017 = pak.con.sf[pak.con.sf$year == "2017", ]
+pak.con.2018 = pak.con.sf[pak.con.sf$year == "2018", ]
+pak.con.2019 = pak.con.sf[pak.con.sf$year == "2019", ]
+pak.con.2020 = pak.con.sf[pak.con.sf$year == "2020", ]
+pak.con.2021 = pak.con.sf[pak.con.sf$year == "2021", ]
+pak.con.2022 = pak.con.sf[pak.con.sf$year == "2022", ]
+
+
+
+
+```
+
+
+
+## **Total Conflict Intersect Method**
+
+```{r Intersect Method - Total Counts - By Year}
+## Total Counts By District By Year
+dist.con.2010 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2010))
+dist.con.2011 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2011))
+dist.con.2012 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2012))
+dist.con.2013 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2013))
+dist.con.2014 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2014))
+dist.con.2015 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2015))
+dist.con.2016 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2016))
+dist.con.2017 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2017))
+dist.con.2018 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2018))
+dist.con.2019 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2019))
+dist.con.2020 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2020))
+dist.con.2021 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2021))
+dist.con.2022 = lengths(st_intersects(x = pak.bound.adm2, pak.con.2022))
+
+## Check
+length(dist.con.2019)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+```
+
+## **Protests Intersect**
+
+```{r Protests by year}
+## Break down protests by year
+protests.2010 = pak.con.2010[pak.con.2010$event_type == "Protests", ]
+protests.2011 = pak.con.2010[pak.con.2011$event_type == "Protests", ]
+protests.2012 = pak.con.2010[pak.con.2012$event_type == "Protests", ]
+protests.2013 = pak.con.2010[pak.con.2013$event_type == "Protests", ]
+protests.2014 = pak.con.2010[pak.con.2014$event_type == "Protests", ]
+protests.2015 = pak.con.2010[pak.con.2015$event_type == "Protests", ]
+protests.2016 = pak.con.2010[pak.con.2016$event_type == "Protests", ]
+protests.2017 = pak.con.2010[pak.con.2017$event_type == "Protests", ]
+protests.2018 = pak.con.2010[pak.con.2018$event_type == "Protests", ]
+protests.2019 = pak.con.2010[pak.con.2019$event_type == "Protests", ]
+protests.2020 = pak.con.2010[pak.con.2020$event_type == "Protests", ]
+protests.2021 = pak.con.2010[pak.con.2021$event_type == "Protests", ]
+protests.2022 = pak.con.2010[pak.con.2022$event_type == "Protests", ]
+
+
+
+
+
+## Check
+#head(protests.2010)
+tail(protests.2010)
+
+```
+
+
+```{r Protests Intersection}
+## Intersect with the adm2 shapefile
+
+dist.protests.2010 = lengths(st_intersects(x = pak.bound.adm2, protests.2010))
+dist.protests.2011 = lengths(st_intersects(x = pak.bound.adm2, protests.2011))
+dist.protests.2012 = lengths(st_intersects(x = pak.bound.adm2, protests.2012))
+dist.protests.2013 = lengths(st_intersects(x = pak.bound.adm2, protests.2013))
+dist.protests.2014 = lengths(st_intersects(x = pak.bound.adm2, protests.2014))
+dist.protests.2015 = lengths(st_intersects(x = pak.bound.adm2, protests.2015))
+dist.protests.2016 = lengths(st_intersects(x = pak.bound.adm2, protests.2016))
+dist.protests.2017 = lengths(st_intersects(x = pak.bound.adm2, protests.2017))
+dist.protests.2018 = lengths(st_intersects(x = pak.bound.adm2, protests.2018))
+dist.protests.2019 = lengths(st_intersects(x = pak.bound.adm2, protests.2019))
+dist.protests.2020 = lengths(st_intersects(x = pak.bound.adm2, protests.2020))
+dist.protests.2021 = lengths(st_intersects(x = pak.bound.adm2, protests.2021))
+dist.protests.2022 = lengths(st_intersects(x = pak.bound.adm2, protests.2022))
+
+
+
+## Check
+length(dist.protests.2015)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+```
+
+
+## **Battles Intersect**
+
+```{r Battles by year}
+## Break down battles by year
+battles.2010 = pak.con.2010[pak.con.2010$event_type == "Battles", ]
+battles.2011 = pak.con.2010[pak.con.2011$event_type == "Battles", ]
+battles.2012 = pak.con.2010[pak.con.2012$event_type == "Battles", ]
+battles.2013 = pak.con.2010[pak.con.2013$event_type == "Battles", ]
+battles.2014 = pak.con.2010[pak.con.2014$event_type == "Battles", ]
+battles.2015 = pak.con.2010[pak.con.2015$event_type == "Battles", ]
+battles.2016 = pak.con.2010[pak.con.2016$event_type == "Battles", ]
+battles.2017 = pak.con.2010[pak.con.2017$event_type == "Battles", ]
+battles.2018 = pak.con.2010[pak.con.2018$event_type == "Battles", ]
+battles.2019 = pak.con.2010[pak.con.2019$event_type == "Battles", ]
+battles.2020 = pak.con.2010[pak.con.2020$event_type == "Battles", ]
+battles.2021 = pak.con.2010[pak.con.2021$event_type == "Battles", ]
+battles.2022 = pak.con.2010[pak.con.2022$event_type == "Battles", ]
+
+
+
+
+
+## Check
+#head(protests.2010)
+tail(battles.2010)
+
+```
+
+
+```{r Battles Intersection}
+## Intersect with the adm2 shapefile
+
+dist.battles.2010 = lengths(st_intersects(x = pak.bound.adm2, battles.2010))
+dist.battles.2011 = lengths(st_intersects(x = pak.bound.adm2, battles.2011))
+dist.battles.2012 = lengths(st_intersects(x = pak.bound.adm2, battles.2012))
+dist.battles.2013 = lengths(st_intersects(x = pak.bound.adm2, battles.2013))
+dist.battles.2014 = lengths(st_intersects(x = pak.bound.adm2, battles.2014))
+dist.battles.2015 = lengths(st_intersects(x = pak.bound.adm2, battles.2015))
+dist.battles.2016 = lengths(st_intersects(x = pak.bound.adm2, battles.2016))
+dist.battles.2017 = lengths(st_intersects(x = pak.bound.adm2, battles.2017))
+dist.battles.2018 = lengths(st_intersects(x = pak.bound.adm2, battles.2018))
+dist.battles.2019 = lengths(st_intersects(x = pak.bound.adm2, battles.2019))
+dist.battles.2020 = lengths(st_intersects(x = pak.bound.adm2, battles.2020))
+dist.battles.2021 = lengths(st_intersects(x = pak.bound.adm2, battles.2021))
+dist.battles.2022 = lengths(st_intersects(x = pak.bound.adm2, battles.2022))
+
+
+
+## Check
+length(dist.battles.2010)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+```
+
+
+## **Explosions/Remote Violence**
+
+```{r Explosions/Remote Violence by year}
+## Break down explosions by year
+expl.2010 = pak.con.2010[pak.con.2010$event_type == "Explosions/Remote violence", ]
+expl.2011 = pak.con.2010[pak.con.2011$event_type == "Explosions/Remote violence", ]
+expl.2012 = pak.con.2010[pak.con.2012$event_type == "Explosions/Remote violence", ]
+expl.2013 = pak.con.2010[pak.con.2013$event_type == "Explosions/Remote violence", ]
+expl.2014 = pak.con.2010[pak.con.2014$event_type == "Explosions/Remote violence", ]
+expl.2015 = pak.con.2010[pak.con.2015$event_type == "Explosions/Remote violence", ]
+expl.2016 = pak.con.2010[pak.con.2016$event_type == "Explosions/Remote violence", ]
+expl.2017 = pak.con.2010[pak.con.2017$event_type == "Explosions/Remote violence", ]
+expl.2018 = pak.con.2010[pak.con.2018$event_type == "Explosions/Remote violence", ]
+expl.2019 = pak.con.2010[pak.con.2019$event_type == "Explosions/Remote violence", ]
+expl.2020 = pak.con.2010[pak.con.2020$event_type == "Explosions/Remote violence", ]
+expl.2021 = pak.con.2010[pak.con.2021$event_type == "Explosions/Remote violence", ]
+expl.2022 = pak.con.2010[pak.con.2022$event_type == "Explosions/Remote violence", ]
+
+
+
+
+
+## Check
+#head(protests.2010)
+tail(expl.2010)
+
+```
+
+
+```{r Explosions/Remote violence Intersection}
+## Intersect with the adm2 shapefile
+
+dist.expl.2010 = lengths(st_intersects(x = pak.bound.adm2, expl.2010))
+dist.expl.2011 = lengths(st_intersects(x = pak.bound.adm2, expl.2011))
+dist.expl.2012 = lengths(st_intersects(x = pak.bound.adm2, expl.2012))
+dist.expl.2013 = lengths(st_intersects(x = pak.bound.adm2, expl.2013))
+dist.expl.2014 = lengths(st_intersects(x = pak.bound.adm2, expl.2014))
+dist.expl.2015 = lengths(st_intersects(x = pak.bound.adm2, expl.2015))
+dist.expl.2016 = lengths(st_intersects(x = pak.bound.adm2, expl.2016))
+dist.expl.2017 = lengths(st_intersects(x = pak.bound.adm2, expl.2017))
+dist.expl.2018 = lengths(st_intersects(x = pak.bound.adm2, expl.2018))
+dist.expl.2019 = lengths(st_intersects(x = pak.bound.adm2, expl.2019))
+dist.expl.2020 = lengths(st_intersects(x = pak.bound.adm2, expl.2020))
+dist.expl.2021 = lengths(st_intersects(x = pak.bound.adm2, expl.2021))
+dist.expl.2022 = lengths(st_intersects(x = pak.bound.adm2, expl.2022))
+
+
+
+## Check
+length(dist.expl.2010)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+
+```
+
+
+
+## **Riots**
+
+```{r Riots by year}
+## Break down riots by year
+riots.2010 = pak.con.2010[pak.con.2010$event_type == "Riots", ]
+riots.2011 = pak.con.2010[pak.con.2011$event_type == "Riots", ]
+riots.2012 = pak.con.2010[pak.con.2012$event_type == "Riots", ]
+riots.2013 = pak.con.2010[pak.con.2013$event_type == "Riots", ]
+riots.2014 = pak.con.2010[pak.con.2014$event_type == "Riots", ]
+riots.2015 = pak.con.2010[pak.con.2015$event_type == "Riots", ]
+riots.2016 = pak.con.2010[pak.con.2016$event_type == "Riots", ]
+riots.2017 = pak.con.2010[pak.con.2017$event_type == "Riots", ]
+riots.2018 = pak.con.2010[pak.con.2018$event_type == "Riots", ]
+riots.2019 = pak.con.2010[pak.con.2019$event_type == "Riots", ]
+riots.2020 = pak.con.2010[pak.con.2020$event_type == "Riots", ]
+riots.2021 = pak.con.2010[pak.con.2021$event_type == "Riots", ]
+riots.2022 = pak.con.2010[pak.con.2022$event_type == "Riots", ]
+
+
+
+
+
+## Check
+#head(protests.2010)
+tail(riots.2010)
+
+```
+
+
+```{r Riots Intersection}
+## Intersect with the adm2 shapefile
+
+dist.riots.2010 = lengths(st_intersects(x = pak.bound.adm2, riots.2010))
+dist.riots.2011 = lengths(st_intersects(x = pak.bound.adm2, riots.2011))
+dist.riots.2012 = lengths(st_intersects(x = pak.bound.adm2, riots.2012))
+dist.riots.2013 = lengths(st_intersects(x = pak.bound.adm2, riots.2013))
+dist.riots.2014 = lengths(st_intersects(x = pak.bound.adm2, riots.2014))
+dist.riots.2015 = lengths(st_intersects(x = pak.bound.adm2, riots.2015))
+dist.riots.2016 = lengths(st_intersects(x = pak.bound.adm2, riots.2016))
+dist.riots.2017 = lengths(st_intersects(x = pak.bound.adm2, riots.2017))
+dist.riots.2018 = lengths(st_intersects(x = pak.bound.adm2, riots.2018))
+dist.riots.2019 = lengths(st_intersects(x = pak.bound.adm2, riots.2019))
+dist.riots.2020 = lengths(st_intersects(x = pak.bound.adm2, riots.2020))
+dist.riots.2021 = lengths(st_intersects(x = pak.bound.adm2, riots.2021))
+dist.riots.2022 = lengths(st_intersects(x = pak.bound.adm2, riots.2022))
+
+
+
+## Check
+length(dist.riots.2010)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+
+```
+
+
+## **Violence Against Civilians**
+
+```{r VAC by year}
+## Break down VAC by year
+vac.2010 = pak.con.2010[pak.con.2010$event_type == "Violence against civilians", ]
+vac.2011 = pak.con.2010[pak.con.2011$event_type == "Violence against civilians", ]
+vac.2012 = pak.con.2010[pak.con.2012$event_type == "Violence against civilians", ]
+vac.2013 = pak.con.2010[pak.con.2013$event_type == "Violence against civilians", ]
+vac.2014 = pak.con.2010[pak.con.2014$event_type == "Violence against civilians", ]
+vac.2015 = pak.con.2010[pak.con.2015$event_type == "Violence against civilians", ]
+vac.2016 = pak.con.2010[pak.con.2016$event_type == "Violence against civilians", ]
+vac.2017 = pak.con.2010[pak.con.2017$event_type == "Violence against civilians", ]
+vac.2018 = pak.con.2010[pak.con.2018$event_type == "Violence against civilians", ]
+vac.2019 = pak.con.2010[pak.con.2019$event_type == "Violence against civilians", ]
+vac.2020 = pak.con.2010[pak.con.2020$event_type == "Violence against civilians", ]
+vac.2021 = pak.con.2010[pak.con.2021$event_type == "Violence against civilians", ]
+vac.2022 = pak.con.2010[pak.con.2022$event_type == "Violence against civilians", ]
+
+
+
+
+
+## Check
+#head(protests.2010)
+tail(vac.2010)
+
+```
+
+
+```{r VAC Intersection}
+## Intersect with the adm2 shapefile
+
+dist.vac.2010 = lengths(st_intersects(x = pak.bound.adm2, vac.2010))
+dist.vac.2011 = lengths(st_intersects(x = pak.bound.adm2, vac.2011))
+dist.vac.2012 = lengths(st_intersects(x = pak.bound.adm2, vac.2012))
+dist.vac.2013 = lengths(st_intersects(x = pak.bound.adm2, vac.2013))
+dist.vac.2014 = lengths(st_intersects(x = pak.bound.adm2, vac.2014))
+dist.vac.2015 = lengths(st_intersects(x = pak.bound.adm2, vac.2015))
+dist.vac.2016 = lengths(st_intersects(x = pak.bound.adm2, vac.2016))
+dist.vac.2017 = lengths(st_intersects(x = pak.bound.adm2, vac.2017))
+dist.vac.2018 = lengths(st_intersects(x = pak.bound.adm2, vac.2018))
+dist.vac.2019 = lengths(st_intersects(x = pak.bound.adm2, vac.2019))
+dist.vac.2020 = lengths(st_intersects(x = pak.bound.adm2, vac.2020))
+dist.vac.2021 = lengths(st_intersects(x = pak.bound.adm2, vac.2021))
+dist.vac.2022 = lengths(st_intersects(x = pak.bound.adm2, vac.2022))
+
+
+
+## Check
+length(dist.vac.2010)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+
+```
+
+
+
+
+## **Strategic Developments**
+
+```{r SD by year}
+## Break down VAC by year
+sd.2010 = pak.con.2010[pak.con.2010$event_type == "Strategic developments", ]
+sd.2011 = pak.con.2010[pak.con.2011$event_type == "Strategic developments", ]
+sd.2012 = pak.con.2010[pak.con.2012$event_type == "Strategic developments", ]
+sd.2013 = pak.con.2010[pak.con.2013$event_type == "Strategic developments", ]
+sd.2014 = pak.con.2010[pak.con.2014$event_type == "Strategic developments", ]
+sd.2015 = pak.con.2010[pak.con.2015$event_type == "Strategic developments", ]
+sd.2016 = pak.con.2010[pak.con.2016$event_type == "Strategic developments", ]
+sd.2017 = pak.con.2010[pak.con.2017$event_type == "Strategic developments", ]
+sd.2018 = pak.con.2010[pak.con.2018$event_type == "Strategic developments", ]
+sd.2019 = pak.con.2010[pak.con.2019$event_type == "Strategic developments", ]
+sd.2020 = pak.con.2010[pak.con.2020$event_type == "Strategic developments", ]
+sd.2021 = pak.con.2010[pak.con.2021$event_type == "Strategic developments", ]
+sd.2022 = pak.con.2010[pak.con.2022$event_type == "Strategic developments", ]
+
+
+
+
+
+## Check
+#head(protests.2010)
+tail(sd.2010)
+
+```
+
+
+```{r SD Intersection}
+## Intersect with the adm2 shapefile
+
+dist.sd.2010 = lengths(st_intersects(x = pak.bound.adm2, sd.2010))
+dist.sd.2011 = lengths(st_intersects(x = pak.bound.adm2, sd.2011))
+dist.sd.2012 = lengths(st_intersects(x = pak.bound.adm2, sd.2012))
+dist.sd.2013 = lengths(st_intersects(x = pak.bound.adm2, sd.2013))
+dist.sd.2014 = lengths(st_intersects(x = pak.bound.adm2, sd.2014))
+dist.sd.2015 = lengths(st_intersects(x = pak.bound.adm2, sd.2015))
+dist.sd.2016 = lengths(st_intersects(x = pak.bound.adm2, sd.2016))
+dist.sd.2017 = lengths(st_intersects(x = pak.bound.adm2, sd.2017))
+dist.sd.2018 = lengths(st_intersects(x = pak.bound.adm2, sd.2018))
+dist.sd.2019 = lengths(st_intersects(x = pak.bound.adm2, sd.2019))
+dist.sd.2020 = lengths(st_intersects(x = pak.bound.adm2, sd.2020))
+dist.sd.2021 = lengths(st_intersects(x = pak.bound.adm2, sd.2021))
+dist.sd.2022 = lengths(st_intersects(x = pak.bound.adm2, sd.2022))
+
+
+
+## Check
+length(dist.sd.2010)
+
+##160 observations
+## This is merged into the total.df in the "overall df build" section
+
+```
+
+
+
+
+## **Counts by Table Method**
+
+```{r Pakistan Conflict Counts by District}
+##Filter the conflict data by district using tabyl
+##Total events by district
+##Note** This uses the districts as laid out by the conflict data (Karachi City instead of E,W,S,K,C Karachi)
+
+pak.district.con = janitor::tabyl(dat = pak.con,
+                                  admin2,
+                                  year)
+
+##Check/View
+pak.district.con
+
+##change admin2 to ADM2_EN to match
+pak.district.con = dplyr::rename(pak.district.con, ADM2_EN = admin2)
+
+##Check/view
+pak.district.con
+table(is.na(pak.district.con$`2010`))
+
+```
+
+
+
+
+```{r Facet Test}
+## Mapping the data by year -----Example Code-------
+
+## Create a year character vector
+#years = as.character(seq(from = 2010, to = 2022, by = 1))
+
+# Check
+# years
+
+## Create a facet map by district and year
+#my.pal = brewer.pal(n = 9, name = "Reds")
+  
+#pak.map + 
+  #tm_fill(years, 
+          #palette = my.pal) +
+  #tm_layout(legend.title.size = 1,
+            #legend.text.size = 0.4,
+            #legend.position = c("right", "bottom")) +
+  #tm_compass(position = c("left", "top"))
+```
+
+
+## **City Conflict Data from ArcPro**
+
+```{r ArcPro Data Read}
+##Note: this data was processed in ArcPro. It was subsetted to include only the study area cities
+
+pak.con.cities = read.csv("../data/conflict/run_2/city_conflict_export_table.csv")
+
+## Convert to table
+pak.con.cities.tbl = janitor::tabyl(dat = pak.con.cities,
+                                         ADM2_EN,
+                                          year_1,
+                                          event_type_1)
+
+## Class check
+class(pak.con.cities.tbl)
+
+##Coerce as a dataframe 
+
+
+## Check
+pak.con.cities.tbl
+
+
+```
+
+
+```{r Cities Conflict to long format}
+## Convert to long format
+#cities.long = pak.con.cities.tbl %>%
+  #pivot_longer(cols = starts_with("20"), 
+               #names_to = "year",
+              #names_transform = list(year = as.numeric))
+
+```
+
+
+# **Population Data**
+
+
+```{r Landscan Population Data Read}
+# Timing
+start = Sys.time()
+
+## Read in the data
+pop.2010 = raster("../data/population/landscan_2010/landscan-global-2010.tif")
+pop.2011 = raster("../data/population/landscan_2011/landscan-global-2011.tif")
+pop.2012 = raster("../data/population/landscan_2012/landscan-global-2012.tif")
+pop.2013 = raster("../data/population/landscan_2013/landscan-global-2013.tif")
+pop.2014 = raster("../data/population/landscan_2014/landscan-global-2014.tif")
+pop.2015 = raster("../data/population/landscan_2015/landscan-global-2015.tif")
+pop.2016 = raster("../data/population/landscan_2016/landscan-global-2016.tif")
+pop.2017 = raster("../data/population/landscan_2017/landscan-global-2017.tif")
+pop.2018 = raster("../data/population/landscan_2018/landscan-global-2018.tif")
+pop.2019 = raster("../data/population/landscan_2019/landscan-global-2019.tif")
+pop.2020 = raster("../data/population/landscan_2020/landscan-global-2020.tif")
+pop.2021 = raster("../data/population/landscan_2021/landscan-global-2021.tif")
+
+
+## Crop it
+pop.2010 = crop(pop.2010, pak.bound)
+pop.2011 = crop(pop.2011, pak.bound)
+pop.2012 = crop(pop.2012, pak.bound)
+pop.2013 = crop(pop.2013, pak.bound)
+pop.2014 = crop(pop.2014, pak.bound)
+pop.2015 = crop(pop.2015, pak.bound)
+pop.2016 = crop(pop.2016, pak.bound)
+pop.2017 = crop(pop.2017, pak.bound)
+pop.2018 = crop(pop.2018, pak.bound)
+pop.2019 = crop(pop.2019, pak.bound)
+pop.2020 = crop(pop.2020, pak.bound)
+pop.2021 = crop(pop.2021, pak.bound)
+
+# Mask it
+pop.2010 = mask(pop.2010, mask = pak.bound)
+pop.2011 = mask(pop.2011, mask = pak.bound)
+pop.2012 = mask(pop.2012, mask = pak.bound)
+pop.2013 = mask(pop.2013, mask = pak.bound)
+pop.2014 = mask(pop.2014, mask = pak.bound)
+pop.2015 = mask(pop.2015, mask = pak.bound)
+pop.2016 = mask(pop.2016, mask = pak.bound)
+pop.2017 = mask(pop.2017, mask = pak.bound)
+pop.2018 = mask(pop.2018, mask = pak.bound)
+pop.2019 = mask(pop.2019, mask = pak.bound)
+pop.2020 = mask(pop.2020, mask = pak.bound)
+pop.2021 = mask(pop.2021, mask = pak.bound)
+
+## Timing
+end = Sys.time()
+
+print(end - start)
+
+```
+
+
+Note: The total Pakistan population in 2010 is 184,321,426
+
+
+```{r Population Sum}
+
+##Start time
+st1 = Sys.time()
+
+pop.2010.sum = cellStats(pop.2010, sum)
+pop.2011.sum = cellStats(pop.2011, sum)
+pop.2012.sum = cellStats(pop.2012, sum)
+pop.2013.sum = cellStats(pop.2013, sum)
+pop.2014.sum = cellStats(pop.2014, sum)
+pop.2015.sum = cellStats(pop.2015, sum)
+pop.2016.sum = cellStats(pop.2016, sum)
+pop.2017.sum = cellStats(pop.2017, sum)
+pop.2018.sum = cellStats(pop.2018, sum)
+pop.2019.sum = cellStats(pop.2019, sum)
+pop.2020.sum = cellStats(pop.2020, sum)
+pop.2021.sum = cellStats(pop.2021, sum)
+
+##Coerce into a data frame
+pop.df = data.frame(year = seq(from = 2010, to = 2021, by = 1), pop = c(pop.2010.sum, pop.2011.sum, pop.2012.sum, pop.2013.sum, pop.2014.sum, pop.2015.sum, pop.2016.sum, pop.2017.sum, pop.2018.sum, pop.2019.sum, pop.2020.sum, pop.2021.sum))
+
+
+#End time
+et1 = Sys.time()
+print(et1 - st1)
+
+```
+
+
+```{r Population Visualization by Year}
+
+##Scale the population (by millions)
+pop.df$pop_scaled = pop.df$pop / 1000000
+
+pop.year.plot = ggplot(data = pop.df, aes(x = year, y = pop_scaled)) +
+  geom_point(color = "steelblue") +
+  geom_line(color = "darkgray", linetype = 2 ) +
+  theme_bw() +
+  xlab("Year") +
+  ylab("Population (in millions)")
+
+ggplotly(pop.year.plot)
+
+```
+
+
+## **Extract Population by city/district**
+
+
+```{r Extract Population Sum}
+## Extract Sums by Cities/Districts
+#kp.2010 = raster::extract(pop.2010, karachi, fun = sum)
+  
+#cp.2010 = raster::extract(pop.2010, pak.bound.city, fun = sum)
+
+## 2010 Extract test
+pop.extract.2010 = raster::extract(pop.2010, pak.bound.adm2, fun = sum, na.rm = TRUE)
+
+st2 = Sys.time()
+## 2011-2022 extract
+pop.extract.2011 = raster::extract(pop.2011, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2012 = raster::extract(pop.2012, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2013 = raster::extract(pop.2013, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2014 = raster::extract(pop.2014, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2015 = raster::extract(pop.2015, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2016 = raster::extract(pop.2016, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2017 = raster::extract(pop.2017, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2018 = raster::extract(pop.2018, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2019 = raster::extract(pop.2019, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2020 = raster::extract(pop.2020, pak.bound.adm2, fun = sum, na.rm = TRUE)
+pop.extract.2021 = raster::extract(pop.2021, pak.bound.adm2, fun = sum, na.rm = TRUE)
+#pop.extract.2022 = raster::extract(pop.2022, pak.bound.adm2, fun = sum)
+
+et2 = Sys.time()
+
+print(et2-st2)
+
+
+```
+
+
+```{r Extract Pop Sum Check}
+## Check
+#pop.extract.2010
+
+## Combine to the dataframe
+test.df$pop_2010 = pop.extract.2010[,1]
+test.df$pop_2011 = pop.extract.2011[,1]
+test.df$pop_2012 = pop.extract.2012[,1]
+test.df$pop_2013 = pop.extract.2013[,1]
+test.df$pop_2014 = pop.extract.2014[,1]
+test.df$pop_2015 = pop.extract.2015[,1]
+test.df$pop_2016 = pop.extract.2016[,1]
+test.df$pop_2017 = pop.extract.2017[,1]
+test.df$pop_2018 = pop.extract.2018[,1]
+test.df$pop_2019 = pop.extract.2019[,1]
+test.df$pop_2020 = pop.extract.2020[,1]
+test.df$pop_2021 = pop.extract.2021[,1]
+
+
+## Check
+str(test.df)
+
+summary(test.df)
+
+##Why do we have 8 NAs?
+```
+
+
+```{r Impute the 2022 Population}
+## Calculate the rate of growth
+## Assumes similar growth from the year prior
+
+pop.g.rate = ((test.df$pop_2021 - test.df$pop_2020)/test.df$pop_2020)
+
+## Check
+pop.g.rate
+
+pop_2022 = round(test.df$pop_2021 + (test.df$pop_2021*pop.g.rate))
+
+## Check
+pop_2022
+
+## Add to dataframe
+test.df$pop_2022 = pop_2022
+```
+
+
+```{r Extract Pop Find NAs}
+## Find the NAs
+#test.df.nas = test.df %>% 
+  #filter_all(any_vars(. %in% c(NA)))
+
+## Check
+#test.df.nas
+
+```
+
+
+# **SPEI Data**
+
+
+```{r SPEI Location Setup, warning=FALSE}
+
+## Set up centroids coordinates for each district
+dist.ctrd.crds = st_coordinates(st_centroid(pak.bound.adm2))
+
+
+## Check
+##dist.ctrd.crds
+
+## Join to the test dataframe
+test.df$longitude = dist.ctrd.crds[,1]
+test.df$latitude = dist.ctrd.crds[,2]
+
+## Check
+str(test.df)
+
+```
+
+```{r SPEI Location Setup - 2}
+## Create a vector of names
+names = test.df$districts
+
+## Create a vector of longitude
+long = test.df$longitude
+
+## Create a vector of latitude
+lat = test.df$latitude
+
+## Check
+## No issues
+
+```
+
+
+```{r SPEI Data Read}
+## SPEI Script for four of Pakistan's cities
+
+##Load get spei
+library(getSpei)
+
+##Run script
+location_id = c("Karachi", "Lahore", "Peshawar", "Quetta")
+longitude = c(67.0011, 74.3587, 71.5249, 66.9750)
+latitude = c(24.8607, 31.5204, 34.0151, 30.1798)
+locations_df = data.frame(location_id, longitude, latitude)
+
+# specify arguments and run function:
+d1 <- spec_spei(spei_files = "../data/spei/spei12", start_y = 2010, end_y = 2021, 
+                locations = locations_df)
+
+## Check
+head(d1)
+
+##Change spei column name
+colnames(d1)[which(names(d1) == "../data/spei/spei12")] = "spei"
+
+# Check
+colnames(d1)
+```
+
+
+```{r Aggregate SPEI}
+## Aggregate SPEI by location and year
+
+spei = aggregate(spei ~ location_id + year,
+                 data = d1,
+                 FUN = mean)
+
+## Check
+spei
+
+```
+
+
+```{r Save Spei}
+##save file
+##write.csv(spei, file = "../data/spei/city_spei_20230401.csv")
+
+```
+
+
+
+```{r SPEI Overall Data Test}
+## SPEI Extraction for the centroid of each district
+
+##Run script
+location_id2 = names
+longitude2 = long
+latitude2 = lat
+locations_df2 = data.frame(location_id2, longitude2, latitude2)
+
+# specify arguments and run function:
+d2 <- spec_spei(spei_files = "../data/spei/spei12", start_y = 2010, end_y = 2021, 
+                locations = locations_df2)
+
+## Check
+head(d2)
+
+##Change spei column name
+colnames(d2)[which(names(d2) == "../data/spei/spei12")] = "spei"
+
+# Check
+colnames(d2)
+
+```
+
+
+```{r Overall Aggregate SPEI}
+## Aggregate SPEI by location and year
+
+spei2 = aggregate(spei ~ location_id + year,
+                 data = d2,
+                 FUN = mean)
+
+## Check
+spei2
+
+```
+
+
+```{r Subset SPEI df by year}
+## Subset the dataframe by year
+spei2010 = spei2 %>% 
+  filter(year == 2010)
+
+spei2011 = spei2 %>% 
+  filter(year == 2011)
+
+spei2012 = spei2 %>% 
+  filter(year == 2012)
+
+spei2013 = spei2 %>% 
+  filter(year == 2013)
+
+spei2014 = spei2 %>% 
+  filter(year == 2014)
+
+spei2015 = spei2 %>% 
+  filter(year == 2015)
+
+spei2016 = spei2 %>% 
+  filter(year == 2016)
+
+spei2017 = spei2 %>% 
+  filter(year == 2017)
+
+spei2018 = spei2 %>% 
+  filter(year == 2018)
+
+spei2019 = spei2 %>% 
+  filter(year == 2019)
+
+spei2020 = spei2 %>% 
+  filter(year == 2020)
+
+spei2021 = spei2 %>% 
+  filter(year == 2021)
+
+
+## Check
+head(spei2010)
+
+```
+
+```{r Join SPEI Values to test df}
+## Join the spei values to the test.df
+
+test.df$spei_2010 = spei2010$spei
+test.df$spei_2011 = spei2011$spei
+test.df$spei_2012 = spei2012$spei
+test.df$spei_2013 = spei2013$spei
+test.df$spei_2014 = spei2014$spei
+test.df$spei_2015 = spei2015$spei
+test.df$spei_2016 = spei2016$spei
+test.df$spei_2017 = spei2017$spei
+test.df$spei_2018 = spei2018$spei
+test.df$spei_2019 = spei2019$spei
+test.df$spei_2020 = spei2020$spei
+test.df$spei_2021 = spei2021$spei
+
+## Check
+head(test.df)
+
+```
+
+
+```{r Imputing 2022 SPEI Values}
+## Imputing the SPEI values for 2022??
+
+
+
+spei_2022 = spei2021
+
+## Check
+spei_2022
+
+## Change year value to 2022
+spei_2022 = spei_2022 %>% 
+  mutate(year = 2022)
+
+## Check
+spei_2022
+
+## Add to dataframe
+test.df$spei_2022 = spei_2022$spei
+
+
+```
+
+
+# **Deprivation Index**
+
+**Note:**
+
+The Global Gridded Relative Deprivation Index (GRDI), Version 1 (GRDIv1) data set characterizes the relative levels of multidimensional deprivation and poverty in each 30 arc-second (~1 km) pixel, where a value of 100 represents the highest level of deprivation and a value of 0 the lowest.
+
+**Temp Resolution 2010-2020**
+
+Uses six input components:
+1. Child Dependency Ration (CDR)
+2. Infant Mortality Rates (IMR)
+3. Subnational Human Development Index (SHDI)
+4. Ratio of Built/Non-built up areas (BUILT)
+5. Intensity of Nighttime Lights
+6. Linear Regression of VNL (Lights  - temporal requirement?)
+
+```{r Dep Data Read}
+## Read in the index
+dep.ind = raster("../data/deprivation_index/dep_ind_tif/povmap-grdi-v1.tif")
+
+## Crop and mask pipeline
+dep.ind = dep.ind %>% 
+  crop(pak.bound) %>% 
+  mask(mask = pak.bound)
+
+
+## Crop it
+#dep.ind = crop(dep.ind, pak.bound)
+
+# Mask it
+#dep.ind = mask(dep.ind, mask = pak.bound)
+
+## Check
+plot(dep.ind)
+plot(st_geometry(pak.bound.adm2),
+     add = TRUE)
+
+```
+
+```{r Summarize Dep Index by District}
+## Extract the mean value by district
+
+dep.ind.extract = raster::extract(dep.ind, pak.bound.adm2, fun = mean,
+                                  na.rm = TRUE)
+
+## Check
+summary(dep.ind.extract)
+
+```
+
+```{r Add Dep Index}
+## Add the deprivation index to the dataframe
+## Reminder - this data set covers 2010-2020
+
+test.df$dep.index_2010 = dep.ind.extract[,1]
+test.df$dep.index_2011 = dep.ind.extract[,1]
+test.df$dep.index_2012 = dep.ind.extract[,1]
+test.df$dep.index_2013 = dep.ind.extract[,1]
+test.df$dep.index_2014 = dep.ind.extract[,1]
+test.df$dep.index_2015 = dep.ind.extract[,1]
+test.df$dep.index_2016 = dep.ind.extract[,1]
+test.df$dep.index_2017 = dep.ind.extract[,1]
+test.df$dep.index_2018 = dep.ind.extract[,1]
+test.df$dep.index_2019 = dep.ind.extract[,1]
+test.df$dep.index_2020 = dep.ind.extract[,1]
+test.df$dep.index_2021 = dep.ind.extract[,1]
+test.df$dep.index_2022 = dep.ind.extract[,1]
+
+
+## Check
+head(test.df)
+
+```
+
+
+
+# **Urbanization**
+
+**Note:**
+
+The Global Human Settlement Layer: Population and Built-Up Estimates, and Degree of Urbanization Settlement Model Grid data set provides gridded data on human population (GHS-POP), built-up area (GHS-BUILT), and degree of urbanization (GHS-SMOD) across four time periods: 1975, 1990, 2000, and 2014 (BUILT) or 2015 (POP, SMOD). GHS-BUILT describes the percent built-up area for each 30 arc-second grid cell (approximately 1 km at the equator) based on Landsat imagery from each of the four time periods. GHS-POP consists of census data from the 2010 round of global census from Gridded Population of the World, Version 4, Revision 10 (GPWv4.10) spatially-allocated within census units based on the percent built-up areas from GHS-BUILT. GHS-SMOD uses GHS-BUILT and GHS-POP in order to develop a standardized classification of degree of urbanization grid. 
+
+GHS-SMOD layers are GeoTIFF raster products that contain grid cells with integers, which represent the assigned settlement classification per grid cell.
+
+```{r Urban Data Read}
+## Read in the data
+
+## SMOD - Classification Variable
+urban.2015 = raster("../data/urbanization/ghsl-population-built-up-estimates-degree-urban-smod-ghsl-2014-2015-30ss-v1-geotiff/ghsl-population-built-up-estimates-degree-urban-smod-ghsl-2014-2015-30ss-v1/ghsl-population-built-up-estimates-degree-urban-smod_smod-30ss-2015.tif")
+
+
+## Crop and mask pipeline
+urban.2015 = urban.2015 %>% 
+  crop(pak.bound) %>% 
+  mask(mask = pak.bound)
+
+
+## Crop it
+#dep.ind = crop(dep.ind, pak.bound)
+
+# Mask it
+#dep.ind = mask(dep.ind, mask = pak.bound)
+
+## Check
+plot(urban.2015)
+plot(st_geometry(pak.bound.adm2),
+     add = TRUE)
+
+```
+
+```{r Summarize Urban by District}
+## Extract the mean value by district
+
+urban.2015.extract = raster::extract(urban.2015, pak.bound.adm2, fun = mean)
+
+## Check
+summary(urban.2015.extract)
+
+```
+
+**Note:** 
+
+GHS-BUILT layers are GeoTIFF raster products that contain grid cells with continuous variables, which represent the proportion of the building footprint area within the total size of the grid cell.
+
+
+```{r GHS BUILT Area Read}
+## Read in built area
+
+built.2014 = raster("../data/urbanization/ghsl-population-built-up-estimates-degree-urban-smod-ghsl-2014-2015-30ss-v1-geotiff/ghsl-population-built-up-estimates-degree-urban-smod-ghsl-2014-2015-30ss-v1/ghsl-population-built-up-estimates-degree-urban-smod_built-30ss-2014.tif")
+
+## Crop and mask pipeline
+built.2014 = built.2014 %>% 
+  crop(pak.bound) %>% 
+  mask(mask = pak.bound)
+
+
+## Crop it
+#dep.ind = crop(dep.ind, pak.bound)
+
+# Mask it
+#dep.ind = mask(dep.ind, mask = pak.bound)
+
+## Check
+plot(built.2014)
+plot(st_geometry(pak.bound.adm2),
+     add = TRUE)
+
+
+```
+
+
+```{r BUILT Extract}
+## Extract the mean value by district
+
+built.2014.extract = raster::extract(built.2014, pak.bound.adm2, fun = mean)
+
+## Check
+summary(built.2014.extract)
+```
+
+
+```{r Add BUILT to Test df}
+## Add BUILT to test.df
+## Reminder - this data is only from 2014**
+
+test.df$built_2010 = built.2014.extract[,1]
+test.df$built_2011 = built.2014.extract[,1]
+test.df$built_2012 = built.2014.extract[,1]
+test.df$built_2013 = built.2014.extract[,1]
+test.df$built_2014 = built.2014.extract[,1]
+test.df$built_2015 = built.2014.extract[,1]
+test.df$built_2016 = built.2014.extract[,1]
+test.df$built_2017 = built.2014.extract[,1]
+test.df$built_2018 = built.2014.extract[,1]
+test.df$built_2019 = built.2014.extract[,1]
+test.df$built_2020 = built.2014.extract[,1]
+test.df$built_2021 = built.2014.extract[,1]
+test.df$built_2022 = built.2014.extract[,1]
+
+## Check
+head(test.df)
+
+```
+
+
+
+# **Climate Data**
+
+## **Temperature Data**
+
+```{r Temp Data Read}
+## Read in the temperature data
+
+pak.temp = raster("../data/temperature/seasonal_temp_data.nc", varname = "t2m")
+
+## Look at the data
+pak.temp
+
+## 52 bands = 13 years * 4 months (Jan, Apr, July, Oct) worth of observations
+## **Reminder the temperature data is in Kelvin**
+
+```
+
+
+```{r Temp Raster Stack}
+## Bring in the temp data as a stack in order to extract the bands (year/month that you need)
+
+temp.stack = stack("../data/temperature/seasonal_temp_data.nc", varname = "t2m")
+
+## View the stack
+temp.stack
+
+```
+
+
+```{r Temp Raster Crop and Mask Pipeline}
+## Crop and Mask Pipeline
+
+temp.stack.mask = temp.stack %>% 
+  crop(pak.bound) %>% 
+  mask(mask = pak.bound)
+
+## Check
+temp.pal = brewer.pal(n = 9, 
+                      name = "OrRd")
+
+plot(temp.stack.mask,
+     col = temp.pal)
+plot(st_geometry(pak.bound),
+     border = "black",
+     add = TRUE)
+
+
+```
+
+
+
+```{r Extract Raster Values by District}
+##----TEST----##
+## Works Well!
+
+## Extract the mean value by district
+
+test.temp.extract = raster::extract(temp.stack.mask, pak.bound.adm2, fun = mean, na.rm = TRUE)
+
+## Check
+summary(test.temp.extract)
+```
+
+
+```{r Add Temp to test.df 1}
+## Add the temperature data to the test.df
+
+#add district names to the temperature data frame
+dist.names = test.df$districts
+
+## Check the class of the temp extract
+class(test.temp.extract)
+
+## Convert the extract to a dataframe
+temp.extract.df = as.data.frame(test.temp.extract)
+
+## Check
+class(temp.extract.df)
+dim(temp.extract.df)
+
+## Good - 160 rows(districts) by 52 time steps
+
+```
+
+
+```{r Add Temp to test.df 2}
+
+## Change the rownames of the temp.extract df
+rownames(temp.extract.df) = dist.names
+
+## Check
+rownames(temp.extract.df)
+
+## Add rownames as a column
+temp.extract.df = tibble::rownames_to_column(temp.extract.df, "districts")
+
+## Check
+head(temp.extract.df)
+
+## Check the NAs
+## Find the NAs
+#temp.df.nas = temp.extract.df %>% 
+  #filter_all(any_vars(. %in% c(NA)))
+
+## Check
+#temp.df.nas
+
+temp.extract.df[!complete.cases(temp.extract.df), ]
+## Korangi Karachi - Row 77 has NaN - this is likely because of its small size ~108 km2
+
+## Duplicate East Karachi's observations (Nearest neighbor)
+kk.temp.estimate = temp.extract.df[temp.extract.df$districts == "East Karachi", 1:53]
+
+kk.temp.estimate[1,1] = "Korangi Karachi"
+
+
+temp.extract.df[77,] = kk.temp.estimate
+
+## Check
+temp.extract.df[77,]
+summary(temp.extract.df)
+```
+
+```{r Add Temp to test.df 3}
+
+## Create a vector for temp_
+#temp_ = rep(c("temp.jan_", "temp.apr_", "temp.jul_", "temp.oct_"), times = 13)
+
+## Duplicate the dataframe
+temp.extract.df2 = temp.extract.df
+
+## Create a vector for years
+year = c("temp.jan_2010", "temp.apr_2010", "temp.jul_2010", "temp.oct_2010", "temp.jan_2011", "temp.apr_2011", "temp.jul_2011", "temp.oct_2011", "temp.jan_2012", "temp.apr_2012", "temp.jul_2012", "temp.oct_2012", "temp.jan_2013", "temp.apr_2013", "temp.jul_2013", "temp.oct_2013", "temp.jan_2014", "temp.apr_2014", "temp.jul_2014", "temp.oct_2014", "temp.jan_2015", "temp.apr_2015", "temp.jul_2015", "temp.oct_2015", "temp.jan_2016", "temp.apr_2016", "temp.jul_2016", "temp.oct_2016", "temp.jan_2017", "temp.apr_2017", "temp.jul_2017", "temp.oct_2017", "temp.jan_2018", "temp.apr_2018", "temp.jul_2018", "temp.oct_2018", "temp.jan_2019", "temp.apr_2019", "temp.jul_2019", "temp.oct_2019", "temp.jan_2020", "temp.apr_2020", "temp.jul_2020", "temp.oct_2020", "temp.jan_2021", "temp.apr_2021", "temp.jul_2021", "temp.oct_2021", "temp.jan_2022", "temp.apr_2022", "temp.jul_2022", "temp.oct_2022")
+
+## Change the names!!
+names(temp.extract.df2)[2:53] = year 
+
+
+## Check
+names(temp.extract.df2)
+
+
+```
+
+
+```{r Add Temp to test.df 4}
+## Conversion to celsius
+## kelvin - 273.15 = celsius
+k_to_c = function(x) {
+  (x - 273.15)
+}
+
+## Test
+#x = c(287.0471, 306.7410, 303.9115, 301.3161)
+#k_to_c(x)
+
+## Convert to Celsius
+temp.extract.df2 = k_to_c(temp.extract.df2[,2:53])
+
+
+## Check
+head(temp.extract.df2)
+
+```
+
+```{r cbind Temp to test.df - 5}
+#create a copy
+
+## Merge to the test dataframe
+test.df = cbind(test.df, temp.extract.df2)
+
+
+## Check 
+head(test.df)
+dim(test.df)
+```
+
+
+## **Precipitation Data**
+
+```{r Precip Data Read}
+## Read in the temperature data
+
+pak.precip = raster("../data/precipitation/seasonal_precip_data.nc", varname = "tp")
+
+## Look at the data
+pak.precip
+
+## 52 bands = 13 years * 4 months (Jan, Apr, July, Oct) worth of observations
+## **Reminder the precipitation is in meters*
+
+```
+
+
+```{r Precip Raster Stack}
+## Bring in the temp data as a stack in order to extract the bands (year/month that you need)
+
+precip.stack = stack("../data/precipitation/seasonal_precip_data.nc", varname = "tp")
+
+## View the stack
+precip.stack
+
+```
+
+
+```{r Precip Raster Crop and Mask Pipeline}
+## Crop and Mask Pipeline
+
+precip.stack.mask = precip.stack %>% 
+  crop(pak.bound) %>% 
+  mask(mask = pak.bound)
+
+## Check
+precip.pal = brewer.pal(n = 9, 
+                      name = "Blues")
+
+plot(precip.stack.mask,
+     col = precip.pal)
+plot(st_geometry(pak.bound),
+     border = "black",
+     add = TRUE)
+
+
+```
+
+
+
+```{r Precip Extract Raster Values by District}
+##----TEST----##
+## Works Well!
+
+## Extract the mean value by district
+
+test.precip.extract = raster::extract(precip.stack.mask, pak.bound.adm2, fun = mean, na.rm = TRUE)
+
+## Check
+summary(test.precip.extract)
+
+## Note!
+## **Korangi Karchi NAs**
+```
+
+
+
+```{r Add Precip to test.df 1}
+## Add the precipitation data to the test.df
+
+#add district names to the temperature data frame
+dist.names = test.df$districts
+
+## Check the class of the temp extract
+class(test.precip.extract)
+
+## Convert the extract to a dataframe
+precip.extract.df = as.data.frame(test.precip.extract)
+
+## Check
+class(precip.extract.df)
+dim(precip.extract.df)
+
+## Good - 160 rows(districts) by 52 time steps
+
+```
+
+
+```{r Add Precip to test.df 2}
+
+## Change the rownames of the precip.extract df
+rownames(precip.extract.df) = dist.names
+
+## Check
+rownames(precip.extract.df)
+
+## Add rownames as a column
+precip.extract.df = tibble::rownames_to_column(precip.extract.df, "districts")
+
+## Check
+head(precip.extract.df)
+
+## Check the NAs
+## Find the NAs
+#precip.df.nas = precip.extract.df %>% 
+  #filter_all(any_vars(. %in% c(NA)))
+
+## Check
+#precip.df.nas
+
+precip.extract.df[!complete.cases(precip.extract.df), ]
+## Korangi Karachi - Row 77 has NaN - this is likely because of its small size ~108 km2
+
+## Duplicate East Karachi's observations (Nearest neighbor)
+kk.precip.estimate = precip.extract.df[precip.extract.df$districts == "East Karachi", 1:53]
+
+kk.precip.estimate[1,1] = "Korangi Karachi"
+
+
+precip.extract.df[77,] = kk.precip.estimate
+
+## Check
+precip.extract.df[77,]
+summary(precip.extract.df)
+
+
+```
+
+
+```{r Add Precip to test.df 3}
+
+
+## Duplicate the dataframe
+precip.extract.df2 = precip.extract.df
+
+## Create a vector for years
+year = c("precip.jan_2010", "precip.apr_2010", "precip.jul_2010", "precip.oct_2010", "precip.jan_2011", "precip.apr_2011", "precip.jul_2011", "precip.oct_2011", "precip.jan_2012", "precip.apr_2012", "precip.jul_2012", "precip.oct_2012", "precip.jan_2013", "precip.apr_2013", "precip.jul_2013", "precip.oct_2013", "precip.jan_2014", "precip.apr_2014", "precip.jul_2014", "precip.oct_2014", "precip.jan_2015", "precip.apr_2015", "precip.jul_2015", "precip.oct_2015", "precip.jan_2016", "precip.apr_2016", "precip.jul_2016", "precip.oct_2016", "precip.jan_2017", "precip.apr_2017", "precip.jul_2017", "precip.oct_2017", "precip.jan_2018", "precip.apr_2018", "precip.jul_2018", "precip.oct_2018", "precip.jan_2019", "precip.apr_2019", "precip.jul_2019", "precip.oct_2019", "precip.jan_2020", "precip.apr_2020", "precip.jul_2020", "precip.oct_2020", "precip.jan_2021", "precip.apr_2021", "precip.jul_2021", "precip.oct_2021", "precip.jan_2022", "precip.apr_2022", "precip.jul_2022", "precip.oct_2022")
+
+## Change the names!!
+names(precip.extract.df2)[2:53] = year 
+
+
+## Check
+names(precip.extract.df2)
+
+
+```
+
+
+```{r Add Precip to test.df 4}
+## Conversion to millimeters
+## 1m = 1000 mill
+m_to_mm = function(x) {
+  (x*1000)
+}
+
+
+## Convert to Celsius
+precip.extract.df2 = m_to_mm(precip.extract.df2[,2:53])
+
+
+## Check
+head(precip.extract.df2)
+
+```
+
+
+```{r cbind Precip to test.df - 5}
+#create a copy
+
+## Merge to the test dataframe
+test.df = cbind(test.df, precip.extract.df2)
+
+
+## Check 
+head(test.df)
+dim(test.df)
+```
+
+
+# **Build the Overall Dataframe**
+
+
+```{r Add Total Conflict Counts - 1}
+## Add the rest of the total counts
+test.df$total.con_2010 = dist.con.2010
+test.df$total.con_2011 = dist.con.2011
+test.df$total.con_2012 = dist.con.2012
+test.df$total.con_2013 = dist.con.2013
+test.df$total.con_2014 = dist.con.2014
+test.df$total.con_2015 = dist.con.2015
+test.df$total.con_2016 = dist.con.2016
+test.df$total.con_2017 = dist.con.2017
+test.df$total.con_2018 = dist.con.2018
+test.df$total.con_2019 = dist.con.2019
+test.df$total.con_2020 = dist.con.2020
+test.df$total.con_2021 = dist.con.2021
+test.df$total.con_2022 = dist.con.2022
+
+
+## Check
+head(test.df)
+
+## Counts don't match e.g. Attock 17 vs 13
+## Badin 131 to 108
+## Spatial mismatch with points on the border?
+
+## **NOTE**
+## We use this count to build our table to stay spatially consistent with the pak.bound.adm2 shapefile
+
+```
+
+
+```{r Add Protest Counts df}
+## Add protest columns
+test.df$protests_2010 = dist.protests.2010
+test.df$protests_2011 = dist.protests.2011
+test.df$protests_2012 = dist.protests.2012
+test.df$protests_2013 = dist.protests.2013
+test.df$protests_2014 = dist.protests.2014
+test.df$protests_2015 = dist.protests.2015
+test.df$protests_2016 = dist.protests.2016
+test.df$protests_2017 = dist.protests.2017
+test.df$protests_2018 = dist.protests.2018
+test.df$protests_2019 = dist.protests.2019
+test.df$protests_2020 = dist.protests.2020
+test.df$protests_2021 = dist.protests.2021
+test.df$protests_2022 = dist.protests.2022
+
+## Check
+head(test.df)
+```
+
+
+```{r Add Battles Counts df}
+## Add battles columns
+test.df$battles_2010 = dist.battles.2010
+test.df$battles_2011 = dist.battles.2011
+test.df$battles_2012 = dist.battles.2012
+test.df$battles_2013 = dist.battles.2013
+test.df$battles_2014 = dist.battles.2014
+test.df$battles_2015 = dist.battles.2015
+test.df$battles_2016 = dist.battles.2016
+test.df$battles_2017 = dist.battles.2017
+test.df$battles_2018 = dist.battles.2018
+test.df$battles_2019 = dist.battles.2019
+test.df$battles_2020 = dist.battles.2020
+test.df$battles_2021 = dist.battles.2021
+test.df$battles_2022 = dist.battles.2022
+
+## Check
+head(test.df)
+```
+
+
+```{r Add Explosions Counts df}
+## Add expl columns
+test.df$expl_2010 = dist.expl.2010
+test.df$expl_2011 = dist.expl.2011
+test.df$expl_2012 = dist.expl.2012
+test.df$expl_2013 = dist.expl.2013
+test.df$expl_2014 = dist.expl.2014
+test.df$expl_2015 = dist.expl.2015
+test.df$expl_2016 = dist.expl.2016
+test.df$expl_2017 = dist.expl.2017
+test.df$expl_2018 = dist.expl.2018
+test.df$expl_2019 = dist.expl.2019
+test.df$expl_2020 = dist.expl.2020
+test.df$expl_2021 = dist.expl.2021
+test.df$expl_2022 = dist.expl.2022
+
+## Check
+head(test.df)
+
+```
+
+
+```{r Add Riots Counts df}
+## Add riots columns
+test.df$riots_2010 = dist.riots.2010
+test.df$riots_2011 = dist.riots.2011
+test.df$riots_2012 = dist.riots.2012
+test.df$riots_2013 = dist.riots.2013
+test.df$riots_2014 = dist.riots.2014
+test.df$riots_2015 = dist.riots.2015
+test.df$riots_2016 = dist.riots.2016
+test.df$riots_2017 = dist.riots.2017
+test.df$riots_2018 = dist.riots.2018
+test.df$riots_2019 = dist.riots.2019
+test.df$riots_2020 = dist.riots.2020
+test.df$riots_2021 = dist.riots.2021
+test.df$riots_2022 = dist.riots.2022
+
+## Check
+head(test.df)
+
+```
+
+```{r Add VAC Counts df}
+## Add VAC columns
+test.df$vac_2010 = dist.vac.2010
+test.df$vac_2011 = dist.vac.2011
+test.df$vac_2012 = dist.vac.2012
+test.df$vac_2013 = dist.vac.2013
+test.df$vac_2014 = dist.vac.2014
+test.df$vac_2015 = dist.vac.2015
+test.df$vac_2016 = dist.vac.2016
+test.df$vac_2017 = dist.vac.2017
+test.df$vac_2018 = dist.vac.2018
+test.df$vac_2019 = dist.vac.2019
+test.df$vac_2020 = dist.vac.2020
+test.df$vac_2021 = dist.vac.2021
+test.df$vac_2022 = dist.vac.2022
+
+## Check
+head(test.df)
+
+```
+
+
+
+```{r Add SD Counts df}
+## Add SD columns
+test.df$sd_2010 = dist.sd.2010
+test.df$sd_2011 = dist.sd.2011
+test.df$sd_2012 = dist.sd.2012
+test.df$sd_2013 = dist.sd.2013
+test.df$sd_2014 = dist.sd.2014
+test.df$sd_2015 = dist.sd.2015
+test.df$sd_2016 = dist.sd.2016
+test.df$sd_2017 = dist.sd.2017
+test.df$sd_2018 = dist.sd.2018
+test.df$sd_2019 = dist.sd.2019
+test.df$sd_2020 = dist.sd.2020
+test.df$sd_2021 = dist.sd.2021
+test.df$sd_2022 = dist.sd.2022
+
+## Check
+head(test.df)
+
+```
+
+```{r Add geometry}
+## Extract the shapefile geometry and add it to the dataframe
+geometry = st_geometry(pak.bound.adm2)
+
+## Add to test.df
+test.df$geometry = geometry
+```
+
+
+```{r Drop column script, eval=FALSE}
+
+## Quick script to drop columns
+
+#drop <- c("dep_index")
+          
+#test.df = test.df[,!(names(test.df) %in% drop)]
+
+## Check
+#head(test.df)
+```
+
+
+```{r Complete df tidy}
+## Tidy up the dataframe
+## pivot from wide to long
+
+## Create a vector of variable names
+#var.names = c("pop", "spei", "dep.index", "built", "total.con", "protests", "battles", "expl", "riots", "vac", "sd")
+
+
+## Pivot Longer
+
+complete.df = test.df %>% 
+  pivot_longer(
+    cols = -c(districts, longitude, latitude, geometry),
+    names_sep = "_",
+    names_to = c(".value", "year")
+  )
+
+
+## Check
+head(complete.df)
+
+```
+
+
+
+```{r Complete df write, warning=FALSE}
+## Save the wide data frame
+#write.csv(test.df,
+          #file = "../data/conflict/complete_dataframe_20230404.csv",
+          #append = TRUE)
+
+## Save the long dataframe
+## Orignal Version is dated 20230405
+## Version with geometry is dated 20230411
+
+#write.csv(complete.df,
+          #file = "../data/conflict/complete_dataframe_long_20230411.csv",
+          #append = FALSE)
+
+## If writing the spatial data, may need to write it as a shape file?
+
+#st_write(complete.df,
+         #dsn = "../data/conflict/complete_data_20230411.shp")
+```
+
+
+
+
