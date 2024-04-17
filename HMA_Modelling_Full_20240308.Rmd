@@ -1,0 +1,1271 @@
+---
+title: "HMA_Con_Model_20240308"
+author: "David Leydet"
+date: "2024-03-08"
+output:
+ html_document:
+   toc: yes
+   toc_depth: 3
+   theme: yeti
+   toc_float: yes
+---
+
+# **Introduction**
+
+- This file is my working code for modelling conflict in HMA. Analysis began on March 3, 2024. 
+
+- Update on April, 8, 2024: Analysis of the data at the administrative boundary 1 level by country (data: hma_df_provinces_20240318.csv)
+
+
+```{r Setup}
+
+##Set working directory
+##r code is the same level as data
+##data has the following subfolders - conflict, IPUMS, NASA HiMAT, population, Suicide, and Water Basins
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code")
+
+```
+
+```{r Library Load, message=FALSE}
+## Load applicable libraries
+
+library(mapview) #mapping package
+library(raster) #raster data manipulation (Climate Data)
+library(RColorBrewer) #color palettes for visualization
+library(sf) #simple features for spatial data
+library(tmap) #mapping package
+library(viridis) #color palette for visualization
+library(ncdf4) #working with netCDF files (Climate Data)
+library(leaflet) #basemaps for mapview
+library(ggplot2) #better figures
+library(ggcorrplot) #Load the correlation plot package
+library(plotly) #interactive figures
+library(maps) #mapping 
+library(kableExtra) #creating better tables and outputs
+library(dplyr) #count and data functions
+library(reshape2) ## Package used to reformat data - wide to long
+library(tidyverse) ##Formatting dataframes, merge, and join
+library(stargazer) ##Formatting model outputs to tables
+library(pscl) ##Used to calculate pseudo r^2 values for log regression models (poisson)
+library(janitor) ##Used to count/provide summaries for dataframes
+library(jtools) ##Used to produce aesthetically pleasing model output tables
+library(huxtable) ##Used in conjunction with jtools to export model outputs
+library(flextable) ##Needed to knit. linked to the janitor library
+library(geomerge) ##Merges conducts a series of spatial joins to combine geospatial data ##Andrew Linke recommendation!!
+library(tidyr) ##reshaping data formats long/wide
+library(lubridate) ##Helps dealing with date/time ##Needed for geomerge
+library(kohonen) #self organizing maps
+library(ggpubr) ##publication ready tables
+library(stats) ##Stats functions
+library(lme4) ##linear mixed effects model
+
+
+```
+
+
+
+
+# **Data** 
+
+```{r Read In Data}
+## Read in the overall model data frame
+## this was assembled in excel
+## use version 2
+
+hma.con.df = read.csv("../data/conflict/hma_initial_model_df_v3_20240304.csv")
+
+
+## Check
+str(hma.con.df)
+
+```
+
+```{r Provinces Data}
+## Load the data frame with the provinces
+
+##HMA province dataframe
+hma.con.prov = read.csv("../data/conflict/hma_df_provinces_20240318.csv")
+
+##Check
+str(hma.con.prov)
+
+```
+
+
+
+## **Wide to Long Dataframe Pivot**
+
+```{r Complete df tidy}
+## Tidy up the dataframe
+## pivot from wide to long
+
+
+
+## Pivot Longer
+
+hma.con.df.long = hma.con.df %>% 
+  pivot_longer(
+    cols = -c(country),
+    names_sep = "\\.",
+    names_to = c(".value", "year")
+  )
+
+
+## Check
+head(hma.con.df.long)
+
+```
+
+
+```{r Complete df tidy - Provinces}
+## Tidy up the dataframe
+## pivot from wide to long
+
+
+
+## Pivot Longer
+
+hma.con.prov.long = hma.con.prov %>% 
+  pivot_longer(
+    cols = -c(country, adm1),
+    names_sep = "\\.",
+    names_to = c(".value", "year")
+  )
+
+
+## Check
+head(hma.con.prov.long)
+
+```
+
+```{r HMA Long to CSV}
+##write the long dataframe to csv
+#write.csv(hma.con.df.long, file = "../data/conflict/hma_df_long_20240410.csv")
+
+```
+
+
+
+## **Standardize Conflict Variable**
+
+```{r Empty Z score column}
+## Create an empty vector/column
+
+hma.con.df.long[ ,'zscore'] = NA
+
+## Check
+view(hma.con.df.long)
+
+```
+
+
+```{r Z Score Transformation}
+## Testing the Z score transform
+## in this case we are scaling the conflict counts to a z score
+## This is done **by country**
+
+hma.con.df.long[hma.con.df.long$country == 'Afghanistan', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Afghanistan', 'con'], center = TRUE, scale = TRUE)
+
+
+## Check
+hma.con.df.long[hma.con.df.long$country == 'Afghanistan', 'zscore']
+```
+
+```{r Z Score Transformation 2}
+## Testing the Z score transform
+## in this case we are scaling the conflict counts to a z score
+## This is done **by country**
+
+hma.con.df.long[hma.con.df.long$country == 'Bangladesh', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Bangladesh', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Bhutan', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Bhutan', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'China', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'China', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'India', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'India', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Kyrgyz Republic', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Kyrgyz Republic', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Myanmar', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Myanmar', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Nepal', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Nepal', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Pakistan', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Pakistan', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Tajikistan', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Tajikistan', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Turkmenistan', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Turkmenistan', 'con'], center = TRUE, scale = TRUE)
+
+hma.con.df.long[hma.con.df.long$country == 'Uzbekistan', 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == 'Uzbekistan', 'con'], center = TRUE, scale = TRUE)
+
+
+## Check
+view(hma.con.df.long)
+```
+
+
+```{r zscore entire df}
+##zcore the conflict variable by the entire dataframe instead of by country
+##test
+
+##The error jumped exponentially!!
+
+#hma.con.df.long$zscore = scale(hma.con.df.long$con, center = TRUE, scale = TRUE)
+
+#check
+#head(hma.con.df.long$zscore)
+```
+
+
+```{r zscore script}
+##Define the function
+
+#z.transform = function(x){
+  #hma.con.df.long[hma.con.df.long$country == x, 'zscore'] = scale(hma.con.df.long[hma.con.df.long$country == x, 'con'], center = TRUE, scale = TRUE)
+
+#}
+
+
+```
+
+
+```{r Apply to Countries}
+#countries = c("Afghanistan", "Bhutan")
+
+##use lappy to apply to the rest of the countries
+#z.transform("Afghanistan")
+
+##Check
+#view(hma.con.df.long)
+
+```
+
+
+## **Impute Missing Values for the Provinces Dataframe**
+
+```{r Provinces dataframe summary}
+## Check the dataframe for NAs (should be nlights and conflict counts)
+
+summary(hma.con.prov.long)
+
+## Confirmed - nlights and conflict
+
+```
+
+
+- Experiment using the package missForest to impute missing values
+
+
+```{r missForest}
+#Load missForest
+library(missForest)
+
+```
+
+
+```{r impute using missForest 1}
+##Convert Characters into factors
+hma.con.prov.long$country = as.factor(hma.con.prov.long$country)
+hma.con.prov.long$adm1 = as.factor(hma.con.prov.long$adm1)
+hma.con.prov.long$year = as.numeric(hma.con.prov.long$year)
+
+##Convert to a dataframe for missForest
+hma.con.prov.long = as.data.frame(hma.con.prov.long)
+
+##Remove the adm1 levels for missForest to run correctly
+hma.prov.ex = subset(hma.con.prov.long, select = -adm1)
+
+
+```
+
+```{r impute using missForest 2}
+
+##Impute using missForest
+hma.prov.imp = missForest(hma.prov.ex)
+          
+
+
+##Check
+summary(hma.prov.imp$ximp)
+```
+
+
+```{r Check Imputation}
+##Check the imputation to see how well it did
+##nlights
+plot(density(hma.prov.ex$nlights, na.rm=TRUE))
+lines(density(hma.prov.imp$ximp$nlights), col = "red", lty = 2)
+
+##conflict
+plot(density(hma.prov.ex$con, na.rm=TRUE))
+lines(density(hma.prov.imp$ximp$con), col = "red", lty = 2)
+
+```
+
+
+```{r New Dataframe for the Random Forest}
+##Create a new dataframe with the imputed values
+prov.df = hma.prov.imp$ximp
+
+##Add back in the adm1
+prov.df$adm1 = hma.con.prov.long$adm1
+
+##relocate adm1 column after country
+# prov.df %>% relocate(adm1, .after = country)
+
+##Check
+str(prov.df)
+
+```
+
+```{r write prov.df}
+##write the finished dataframe to a new csv
+#write.csv(prov.df, file = "../davidleydet/Desktop/prov_df.csv")
+
+```
+
+
+## **Histogram Check**
+
+```{r histogram 1}
+## population
+h1 = prov.df %>% 
+  gghistogram(x = "pop")
+
+## temp
+h2 = prov.df %>% 
+  gghistogram(x = "temp")
+
+## precip
+h3 = prov.df %>% 
+  gghistogram(x = "precip")
+
+## nlights
+h4 = prov.df %>% 
+  gghistogram(x = "nlights")
+
+## ge
+h5 = prov.df %>% 
+  gghistogram(x = "ge")
+
+
+## cpt
+h6 = prov.df %>% 
+  gghistogram(x = "cpt")
+
+
+## Visualize 
+ggarrange(h1, h2, h3, h4, h5, h6)
+
+
+```
+
+```{r histogram 2}
+## rol
+h7 = prov.df %>% 
+  gghistogram(x = "rol")
+
+## rq
+h8 = prov.df %>% 
+  gghistogram(x = "rq")
+
+## polstab
+h9 = prov.df %>% 
+  gghistogram(x = "polstab")
+
+## voice
+h10 = prov.df %>% 
+  gghistogram(x = "voice")
+
+## conflict
+h11 = prov.df %>% 
+  gghistogram(x = "con")
+
+## Visualize 
+ggarrange(h7, h8, h9, h10, h11)
+
+
+```
+
+
+
+
+
+# **Random Forest**
+
+## **Country Level Analysis**
+
+```{r RF Package Load, message=FALSE}
+#load mlr3
+library(mlr3)
+library(ranger)
+library(mlr3verse)
+library(mlr3tuning)
+library(paradox)
+
+##Learner (Regression Outcome for conflict counts)
+##Think about re-running it with a standardized incidence rate
+##May need to log transform some variables
+
+```
+
+
+
+```{r Task}
+#Define the task
+task_con = TaskRegr$new(id = "con",
+                        backend = hma.con.df.long,
+                        target = "zscore")
+
+# Task details
+task_con$col_roles
+
+```
+
+
+```{r Exclude Features}
+#if necessary exclude features here
+## Exclude country***
+task_con$col_roles$feature = setdiff(task_con$col_roles$feature,
+                                          c("country", "con", "polstab"))
+
+
+## Check
+task_con$col_roles
+
+
+```
+
+
+
+```{r Performance Measure}
+##Define the performance measure
+##Regression Task
+##additional measures can be found with msr()
+
+measure = msr("regr.rmse")
+
+
+```
+
+
+
+```{r Learner}
+#Define the learner
+lrn_rf = lrn("regr.ranger",
+             predict_type = "response",
+             importance = "permutation")
+
+
+```
+
+
+```{r Resampling Method}
+## Define the resampling method
+## 1st Run - Simple holdout 0.8
+resamp_hout = rsmp("holdout",
+                   ratio = 0.8)
+
+
+## Instantiate the resampling method
+resamp_hout$instantiate(task_con)
+
+
+```
+
+
+```{r Resampler and Model Run}
+## Run the resampler/model
+##con = conflict
+
+c_rf = resample(task = task_con,
+                 learner = lrn_rf,
+                 resampling = resamp_hout,
+                 store_models = TRUE)
+
+
+```
+
+
+```{r Performance Measure Check}
+## Check the performace measures
+c_rf$score(measure)
+
+
+```
+
+
+```{r Performance Measure 2}
+##Convert the RMSE to a percentage
+rmse = c_rf$score(measure)
+
+##Percentage Conversion
+rmse = (rmse$regr.rmse / 3.2) * 100
+
+##Show RMSE
+print(rmse)
+
+```
+
+
+## **Random Forest Model Tune**
+
+```{r Parameter Check}
+#Show the tuning parameters
+lrn_rf$param_set
+
+```
+
+
+```{r Parameter Set Build}
+## Build parameter set for tuning
+##mtry = number of variables per split
+##num.trees = number of trees built
+
+tune_ps = ParamSet$new(list(
+  ParamInt$new("mtry", lower = 1, upper = 8),
+  ParamInt$new("num.trees", lower = 100, upper = 1000)
+))
+
+
+
+```
+
+
+```{r Stopping Condition}
+## Limit the number of iterations/evaluations to 50
+evals = trm("evals",
+            n_evals = 50)
+
+```
+
+
+
+```{r Tuner Search}
+## Define the tuner to grid search with 10 steps between the lower and upper bounds
+tuner = tnr("grid_search",
+            resolution = 10)
+```
+
+
+```{r Nested Resampling}
+## Set up the nested resampling for tuning
+## Build the resample for the inner
+resampling_inner = rsmp("holdout",
+                        ratio = 0.8)
+
+## Build the resample for the outer (in this case 3-fold)
+resampling_outer = rsmp("cv", 
+                        folds = 3)
+
+```
+
+
+```{r AutoTuner Setup}
+## Set up the autotuner
+
+at_rf = AutoTuner$new(learner = lrn_rf,
+                      resampling = resampling_inner,
+                      measure = measure,
+                      search_space = tune_ps,
+                      terminator = evals,
+                      tuner = tuner)
+
+```
+
+
+```{r Rerun Model}
+## Tuning the paramaters using the parameter set/solution
+
+c_rf.2 = resample(task = task_con,
+                 learner = at_rf,
+                 resampling = resampling_outer,
+                 store_models = TRUE)
+```
+
+
+```{r Check Performance Measure Tuned Model}
+##Check performance measures
+c_rf.2$score(measure)
+
+```
+
+```{r Aggregate Performance Measure Score}
+c_rf.2$aggregate(measure)
+
+##Goes from under predicting to over predicting.
+
+```
+
+
+
+# **Variable Importance and Partial Dependency Plots**
+
+```{r VIP PDP Load, message=FALSE}
+##Load libraries
+library(vip)
+library(pdp)
+
+```
+
+
+
+```{r VIP Plot}
+##Visualize the un-tuned model - since it performed better
+vip(c_rf$learners[[1]]$model)
+```
+
+## **PDP Plots
+
+
+```{r Full Define a Plotting Helper Function}
+## Define a helper function to plot
+
+
+pdp.plot = function(x){
+  partial(c_rf$learners[[1]]$model, 
+        pred.var = x, prob = TRUE, 
+        train = hma.con.df.long, plot = TRUE, which.class = 2)
+}
+
+```
+
+```{r Full Loop to Plot}
+## Define a loop to plot all of the variables
+## pdp.plot is the helper function
+## This plot the relative weights? in the SOM?
+
+lapply(names(hma.con.df.long[,2:15]), pdp.plot)
+
+```
+
+```{r PDP Plots - Politcal Stablity}
+
+partial(c_rf$learners[[1]]$model, 
+        pred.var = "polstab", prob = TRUE, 
+        train = hma.con.df.long, plot = TRUE, which.class = 2)
+
+```
+
+
+
+# **Mixed Effects Model**
+
+```{r Data Setup}
+##Set countries as a factor
+hma.con.df.long$country = as.factor(hma.con.df.long$country)
+
+##Set year as a number
+hma.con.df.long$year = as.numeric(hma.con.df.long$year)
+
+##Check
+str(hma.con.df.long)
+
+```
+
+
+```{r Correlation Matrix}
+##Use the orignal dataframe
+con.df.sub = subset(hma.con.df.long, select = -c(country, year))
+
+##Correlation Matrix
+
+ggcorrplot(cor(con.df.sub), 
+           method = "square",
+           type = "full",
+           lab = TRUE,
+           colors = c("blue", "darksalmon", "firebrick"))
+
+```
+
+
+```{r Basic Linear Model}
+##Intercept model
+fit0 = lm(zscore ~ 1, data = hma.con.df.long)
+
+##Summary
+summary(fit0)
+
+```
+
+
+```{r Mixed Effects Model 1, message=FALSE}
+#load nlme and lme4 library
+library(nlme)
+library(lme4)
+
+
+```
+
+
+
+```{r MEM 2}
+## glm mixed effects model
+fit1 = lme(zscore ~ gdp + pop + temp + cd + urbanpop + ge + cpt + voice + waterwith + rol + rq,
+           random = ~1|country,
+            data = hma.con.df.long)
+
+## summary 
+summary(fit1)
+
+```
+
+
+
+## **Re-Analysis without imputed year**
+
+This section of code drops observations that use estimated conflict counts for countries without data in ACLED. The list below denotes when data collection began:
+- Afghanistan: 2017
+- Bangladesh: 2010
+- Bhutan: 2020
+- China: 2018
+- India: 2016
+- Kyrgyz Republic: 2018
+- Nepal: 2010
+- Pakistan: 2010
+- Myanmar: 2010
+- Tajikistan: 2018
+- Turkmenistan: 2018
+- Uzbekistan: 2018
+
+```{r Duplicate Dataframe}
+## Duplicate the long dataframe
+con2 = hma.con.df.long
+
+
+```
+
+
+```{r Subsetting Data}
+##Test 
+##subset dataframe based on Afghanistan and years 2017 and on
+afg = subset(con2, con2$country == 'Afghanistan' & con2$year >= 2017)
+
+##check
+view(afg)
+
+```
+
+
+```{r Subsetting Data 2}
+##Subset all of the other countries
+##subset dataframe based on Bangladesh and years 2010 and on
+ban = subset(con2, con2$country == 'Bangladesh' & con2$year >= 2010)
+
+##subset dataframe based on Bangladesh and years 2020 and on
+bhu = subset(con2, con2$country == 'Bhutan' & con2$year >= 2020)
+
+##subset dataframe based on China and years 2018 and on
+chi = subset(con2, con2$country == 'China' & con2$year >= 2018)
+
+##subset dataframe based on India and years 2016 and on
+ind = subset(con2, con2$country == 'India' & con2$year >= 2016)
+
+##subset dataframe based on Kyrgyz Republic and years 2018 and on
+kyr = subset(con2, con2$country == 'Kyrgyz Republic' & con2$year >= 2018)
+
+##subset dataframe based on Nepal and years 2010 and on
+nep = subset(con2, con2$country == 'Nepal' & con2$year >= 2010)
+
+##subset dataframe based on Pakistan and years 2010 and on
+pak = subset(con2, con2$country == 'Pakistan' & con2$year >= 2010)
+
+##subset dataframe based on Myanmar and years 2010 and on
+mya = subset(con2, con2$country == 'Myanmar' & con2$year >= 2010)
+
+##subset dataframe based on Tajikistan and years 2010 and on
+taj = subset(con2, con2$country == 'Tajikistan' & con2$year >= 2018)
+
+##subset dataframe based on Turkmenistan and years 2010 and on
+tur = subset(con2, con2$country == 'Turkmenistan' & con2$year >= 2018)
+
+##subset dataframe based on Uzbekistan and years 2010 and on
+uzb = subset(con2, con2$country == 'Uzbekistan' & con2$year >= 2018)
+
+```
+
+
+```{r List and Merge}
+##Merge all of the countries back together into one dataframe
+
+##Merge by rows using rbind
+con.reduced = rbind(afg, ban, bhu, chi, ind, kyr, nep, pak, mya, taj, tur, uzb)
+
+##Check
+view(con.reduced)
+```
+
+```{r Recalculate Z scores}
+##Zero out the zscore column
+con.reduced$zscore = NA
+
+##Recalculate Z scores
+con.reduced[con.reduced$country == 'Afghanistan', 'zscore'] = scale(con.reduced[con.reduced$country == 'Afghanistan', 'con'], center = TRUE, scale = TRUE)
+
+
+## Check
+con.reduced[con.reduced$country == 'Afghanistan', 'zscore']
+
+```
+
+```{r Recalculate Z score 2}
+## recalculate
+
+con.reduced[con.reduced$country == 'Bangladesh', 'zscore'] = scale(con.reduced[con.reduced$country == 'Bangladesh', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Bhutan', 'zscore'] = scale(con.reduced[con.reduced$country == 'Bhutan', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'China', 'zscore'] = scale(con.reduced[con.reduced$country == 'China', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'India', 'zscore'] = scale(con.reduced[con.reduced$country == 'India', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Kyrgyz Republic', 'zscore'] = scale(con.reduced[con.reduced$country == 'Kyrgyz Republic', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Myanmar', 'zscore'] = scale(con.reduced[con.reduced$country == 'Myanmar', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Nepal', 'zscore'] = scale(con.reduced[con.reduced$country == 'Nepal', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Pakistan', 'zscore'] = scale(con.reduced[con.reduced$country == 'Pakistan', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Tajikistan', 'zscore'] = scale(con.reduced[con.reduced$country == 'Tajikistan', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Turkmenistan', 'zscore'] = scale(con.reduced[con.reduced$country == 'Turkmenistan', 'con'], center = TRUE, scale = TRUE)
+
+con.reduced[con.reduced$country == 'Uzbekistan', 'zscore'] = scale(con.reduced[con.reduced$country == 'Uzbekistan', 'con'], center = TRUE, scale = TRUE)
+
+
+## Check
+view(con.reduced)
+```
+
+
+
+## **Random Forest Redo**
+
+
+```{r Task Redo}
+#Define the task
+task_con2 = TaskRegr$new(id = "con2",
+                        backend = con.reduced,
+                        target = "zscore")
+
+# Task details
+task_con2$col_roles
+
+```
+
+
+```{r Exclude Features Redo}
+#if necessary exclude features here
+## Exclude country***
+task_con2$col_roles$feature = setdiff(task_con2$col_roles$feature,
+                                          c("country", "con", "polstab"))
+
+
+## Check
+task_con2$col_roles
+
+
+```
+
+
+
+```{r Performance Measure Redo}
+##Define the performance measure
+##Regression Task
+##additional measures can be found with msr()
+
+measure2 = msr("regr.rmse")
+
+
+```
+
+
+
+```{r Learner Redo}
+#Define the learner
+lrn_rf2 = lrn("regr.ranger",
+             predict_type = "response",
+             importance = "permutation")
+
+
+```
+
+
+```{r Resampling Method Redo}
+## Define the resampling method
+## 1st Run - Simple holdout 0.8
+resamp_hout2 = rsmp("holdout",
+                   ratio = 0.8)
+
+
+## Instantiate the resampling method
+resamp_hout2$instantiate(task_con2)
+
+
+```
+
+
+```{r Resampler and Model Run Redo}
+## Run the resampler/model
+##con = conflict
+
+c_rf2 = resample(task = task_con2,
+                 learner = lrn_rf2,
+                 resampling = resamp_hout2,
+                 store_models = TRUE)
+
+
+```
+
+
+```{r Performance Measure Check Redo}
+## Check the performace measures
+c_rf2$score(measure2)
+
+
+```
+
+
+```{r Performance Measure Redo Aggregate}
+##Convert the RMSE to a percentage
+rmse2 = c_rf2$score(measure2)
+
+##Percentage Conversion
+rmse2 = (rmse2$regr.rmse / mean(con.reduced$zscore)) * 100
+
+##Show RMSE
+print(rmse2)
+
+```
+
+
+```{r VIP Plot Redo}
+##Visualize the un-tuned model - since it performed better
+vip(c_rf2$learners[[1]]$model)
+```
+
+
+```{r Full Loop to Plot Redo}
+## Define a loop to plot all of the variables
+## pdp.plot is the helper function
+## This plot the relative weights? in the SOM?
+
+lapply(names(con.reduced[,2:15]), pdp.plot)
+
+```
+
+
+
+## **Administrative Level 1 Analysis**
+
+The code below conducts a data analysis of conflict by country at the administrative level 1 boundary.
+
+This analysis uses the province dataframe (prov.df) which already has missing values for nlights (night time lights) and conflict imputed using missForest. 
+
+
+```{r Prov Correlation Matrix}
+##Use the orignal dataframe
+prov.sub = subset(prov.df, select = -c(country, year, adm1))
+
+##Correlation Matrix
+
+ggcorrplot(cor(prov.sub), 
+           method = "square",
+           type = "full",
+           lab = TRUE,
+           colors = c("blue", "darksalmon", "firebrick"))
+
+```
+
+
+```{r Prov Task}
+#Define the task
+task_prov = TaskRegr$new(id = "con",
+                        backend = prov.df,
+                        target = "con")
+
+# Task details
+task_prov$col_roles
+
+```
+
+
+```{r Prov Exclude Features}
+#if necessary exclude features here
+## 
+task_prov$col_roles$feature = setdiff(task_prov$col_roles$feature,
+                                          c("country", "year"))
+
+
+## Check
+task_prov$col_roles
+
+
+```
+
+
+
+```{r Prov Performance Measure}
+##Define the performance measure
+##Regression Task
+##additional measures can be found with msr()
+
+measure = msr("regr.rmse")
+
+
+```
+
+
+
+```{r Prov Learner}
+#Define the learner
+lrn_rf = lrn("regr.ranger",
+             predict_type = "response",
+             importance = "permutation")
+
+
+```
+
+
+```{r Prov Resampling Method}
+## Define the resampling method
+## 1st Run - Simple holdout 0.8
+resamp_hout = rsmp("holdout",
+                   ratio = 0.8)
+
+
+## Instantiate the resampling method
+resamp_hout$instantiate(task_prov)
+
+
+```
+
+
+```{r Prov Resampler and Model Run}
+## Run the resampler/model
+##con = conflict
+
+prov_rf = resample(task = task_prov,
+                 learner = lrn_rf,
+                 resampling = resamp_hout,
+                 store_models = TRUE)
+
+
+```
+
+
+```{r Prov Performance Measure Check}
+## Check the performace measures
+prov_rf$score(measure)
+
+
+```
+
+
+```{r Prov Performance Measure 2}
+##Convert the RMSE to a percentage
+rmse_prov = prov_rf$score(measure)
+
+##Percentage Conversion
+rmse_prov = (rmse_prov$regr.rmse / mean(prov.df$con)) * 100
+
+##Show RMSE
+print(rmse_prov)
+
+```
+
+
+
+
+```{r Prov VIP Plot}
+##Visualize the model
+vip(prov_rf$learners[[1]]$model)
+
+```
+
+```{r Prov PDP Plot Function}
+##PDP plot function
+## Define a helper function to plot
+
+
+prov.pdp.plot = function(x){
+  partial(prov_rf$learners[[1]]$model, 
+        pred.var = x, prob = TRUE, 
+        train = prov.df, plot = TRUE, which.class = 2)
+}
+
+```
+
+
+
+
+```{r Prov Full Loop to Plot}
+## Define a loop to plot all of the variables
+## pdp.plot is the helper function
+## This plot the relative weights? in the SOM?
+
+lapply(names(prov.df[,2:13]), prov.pdp.plot)
+
+```
+
+
+
+## **Adm 1 Analysis using z-scores**
+
+```{r Prov Z scores}
+##Zero out the zscore column
+prov.df$zscore = NA
+
+##Calculate Z scores
+prov.df$zscore = scale(prov.df$con, center = TRUE, scale = TRUE)
+
+## Check
+head(prov.df)
+tail(prov.df)
+
+```
+
+
+
+```{r Prov Task zscore}
+#Define the task
+task_prov2 = TaskRegr$new(id = "con",
+                        backend = prov.df,
+                        target = "zscore")
+
+# Task details
+task_prov2$col_roles
+
+```
+
+
+```{r Prov Exclude Features zscore}
+#if necessary exclude features here
+## 
+task_prov2$col_roles$feature = setdiff(task_prov2$col_roles$feature,
+                                          c("country", "year", "con"))
+
+
+## Check
+task_prov2$col_roles
+
+
+```
+
+
+
+```{r Prov Performance Measure zscore}
+##Define the performance measure
+##Regression Task
+##additional measures can be found with msr()
+
+measure = msr("regr.rmse")
+
+
+```
+
+
+
+```{r Prov Learner zscore}
+#Define the learner
+lrn_rf = lrn("regr.ranger",
+             predict_type = "response",
+             importance = "permutation")
+
+
+```
+
+
+```{r Prov Resampling Method zscore}
+## Define the resampling method
+## 1st Run - Simple holdout 0.8
+resamp_hout = rsmp("holdout",
+                   ratio = 0.8)
+
+
+## Instantiate the resampling method
+resamp_hout$instantiate(task_prov2)
+
+
+```
+
+
+```{r Prov Resampler and Model Run zscore}
+## Run the resampler/model
+##con = conflict
+
+prov_rf2 = resample(task = task_prov2,
+                 learner = lrn_rf,
+                 resampling = resamp_hout,
+                 store_models = TRUE)
+
+
+```
+
+
+```{r Prov Performance Measure Check zscore}
+## Check the performace measures
+prov_rf2$score(measure)
+
+
+```
+
+
+```{r Prov Performance Measure 2 zscore}
+##Convert the RMSE to a percentage
+## Compare it against the range of zscores as opposed to the mean zscore
+rmse_prov2 = prov_rf2$score(measure)
+
+##Percentage Conversion
+rmse_prov2 = (rmse_prov2$regr.rmse / diff(range(prov.df$zscore))) * 100
+
+
+
+##Show RMSE
+print(rmse_prov2)
+
+```
+
+
+
+
+```{r Prov VIP Plot zscore}
+##Visualize the model
+vip(prov_rf2$learners[[1]]$model)
+
+```
+
+```{r Prov PDP Plot Function zscore}
+##PDP plot function
+## Define a helper function to plot
+
+
+prov.pdp.plot2 = function(x){
+  partial(prov_rf2$learners[[1]]$model, 
+        pred.var = x, prob = TRUE, 
+        train = prov.df, plot = TRUE, which.class = 2)
+}
+
+```
+
+
+
+
+```{r Prov Full Loop to Plot zscore}
+## Define a loop to plot all of the variables
+## pdp.plot is the helper function
+## This plot the relative weights? in the SOM?
+
+lapply(names(prov.df[,2:13]), prov.pdp.plot2)
+
+```
+
+
+
+
+
+
+
+
