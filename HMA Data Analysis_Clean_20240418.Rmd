@@ -1,0 +1,326 @@
+---
+title: "HMA Data Analysis (Clean)"
+author: "David Leydet"
+date: "2024-04-18"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    theme: yeti
+---
+
+# **Introduction**
+
+This document consolidates the modeling and analysis efforts into one document. The data used in this analysis is cleaned prior to importing.
+
+
+```{r Set Working Directory, echo=FALSE}
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code/")
+
+```
+
+
+# **Administrative Level 1 Analysis**
+
+## **Imputed Data Read and Adjustment**
+
+```{r Adm1 Data}
+# load cleaned data
+adm.imp = read.csv("../cleaned_data/hma_adm1_imp_df_clean_20240418.csv")
+
+# check
+str(adm.imp)
+
+# remove row number variable (X) from df
+adm.imp = adm.imp %>% 
+  select(-X)
+
+# factor country and adm 1
+adm.imp$country = as.factor(adm.imp$country)
+adm.imp$adm1 = as.factor(adm.imp$adm1)
+
+# check
+str(adm.imp)
+```
+
+```{r Adm1 Zscore}
+# z score the conflict variable
+adm.imp = adm.imp %>% 
+  mutate(zscore = scale(con, center = TRUE, scale = TRUE))
+
+# Check
+str(adm.imp)
+
+```
+
+## **Initial Data Visualizations**
+
+```{r Adm 1 visual}
+plot(adm.imp$year, adm.imp$con)
+
+```
+
+
+```{r Adm 1 Histogram of variables}
+## Check the histogram of variables for normality
+
+## Gross domestic product proxy - nighttime lights
+h1 = adm.imp %>% 
+  gghistogram(x = "nlights")
+
+## Population (AIDDATA)
+h2 = adm.imp %>% 
+  gghistogram(x = "pop")
+
+## Temp (AIDDATA)
+h3 = adm.imp %>% 
+  gghistogram(x = "temp")
+
+## Precip (AIDDATA)
+h4 = adm.imp %>% 
+  gghistogram(x = "precip")
+
+## Total Conflict count (ACLED)
+h5 = adm.imp %>% 
+  gghistogram(x = "con")
+
+## Visualize 
+ggarrange(h1, h2, h3, h4, h5)
+
+```
+
+```{r Adm 1 Histogram of variables 2}
+## Check the histogram of variables for normality
+# World Governance Indicators
+
+h6 = adm.imp %>% 
+  gghistogram(x = "ge")
+
+
+h7 = adm.imp %>% 
+  gghistogram(x = "cpt")
+
+
+h8 = adm.imp %>% 
+  gghistogram(x = "rol")
+
+
+h9 = adm.imp %>% 
+  gghistogram(x = "rq")
+
+
+h10 = adm.imp %>% 
+  gghistogram(x = "polstab")
+
+h11 = adm.imp %>% 
+  gghistogram(x = "voice")
+
+## Visualize 
+ggarrange(h6, h7, h8, h9, h10, h11)
+
+```
+
+
+## **Random Forest**
+
+```{r Adm1 RF iml}
+# load libraries
+library(randomForest) #rf package
+library(iml) #interpretable machine learning package
+
+```
+
+```{r Adm1 RF Data Frame}
+# subset the variables we want to use for this model
+# remove zscore and adm1 (adm1 has too many factors)
+adm.imp.rf.df = adm.imp %>% 
+  select(-zscore, -adm1)
+
+str(adm.imp.rf.df)
+
+```
+
+```{r Adm 1 RF Train}
+st = Sys.time()
+
+# Train the random forest 
+set.seed(123)
+rf = randomForest(con ~ .,
+                  data = adm.imp.rf.df)
+
+et = Sys.time()
+elapsed = et-st
+print(elapsed)
+```
+
+```{r Adm1 RF Errors}
+##pseudo r2 value
+mean(rf$rsq)
+
+```
+
+### *iml Objects and Interpretations**
+
+```{r Adm1 Predictor Object}
+## Create a data frame with the features minus the target
+x = adm.imp.rf.df %>% 
+  select(-con)
+
+# Store the data and con in the predictor container along with the randomForest parameters
+adm.imp.predictor = Predictor$new(model = rf,
+                                  data = x,
+                                  y = adm.imp.rf.df$con)
+
+```
+
+
+```{r Adm1 Feature Importance, message=FALSE}
+## Store the features in a FeatureImp object
+## loss argument specifies the performance measure for error
+importance = FeatureImp$new(predictor = adm.imp.predictor,
+                     loss = "rmse")
+
+```
+
+
+```{r Adm1 Importance Visualization}
+## Visualize the importance using ggplot2
+library(ggplot2)
+
+##Plot
+plot(importance)
+
+```
+
+**Feature Importance**
+
+```{r Adm1 Importance Results}
+## View the the feature importance percentiles
+importance$results
+
+```
+
+
+**Feature Effects**
+
+```{r Adm1 ALE Plot}
+## Reminder this allows us to interpret areas of the curve that may be more important than others
+##grid.size argument is the number of quantiles specified
+
+ale = FeatureEffect$new(predictor = adm.imp.predictor,
+                        feature = "pop",
+                        grid.size = 10)
+
+ale$plot()
+```
+
+```{r Adm1 ALE Plot Loop}
+## Define a helper function to plot
+
+ale.plot = function(x){
+  ale$set.feature(x)
+  ale$plot()
+}
+
+```
+
+```{r Adm1 ALE Plots Complete}
+# plot through the variables
+ale.plot("country")
+ale.plot("temp")
+ale.plot("polstab")
+ale.plot("precip")
+ale.plot("voice")
+ale.plot("ge")
+ale.plot("cpt")
+ale.plot("nlights")
+ale.plot("rol")
+ale.plot("rq")
+ale.plot("year")
+ale.plot("pop")
+
+```
+
+```{r Adm 1 Plot Feature Effects - All}
+##Plot all of the feature effects at once
+
+effs = FeatureEffects$new(predictor = adm.imp.predictor,
+                          grid.size = 10)
+
+# Visualize
+plot(effs)
+
+```
+
+**Partial Dependecy Plots**
+
+```{r Adm1 PDPs}
+#population
+#store it in an object
+rf.pop = Partial$new(predictor = adm.imp.predictor,
+                        feature = "pop",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.country = Partial$new(predictor = adm.imp.predictor,
+                        feature = "country",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.temp = Partial$new(predictor = adm.imp.predictor,
+                        feature = "temp",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+# center (this centers the impact of y hat on a starting value)
+rf.pop$center(min(adm.imp.rf.df$pop))
+rf.temp$center(min(adm.imp.rf.df$temp))
+
+# plot
+p1 = plot(rf.pop) + ggtitle("Random Forest")
+p2 = plot(rf.country) + ggtitle("Random Forest")
+p3 = plot(rf.temp) + ggtitle("Random Forest")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+
+```
+
+
+**Measure Interactions**
+
+```{r Adm 1 Interactions}
+st = Sys.time()
+##Set up the interactions wrapper
+##Play around with grid.size
+
+adm.interact = Interaction$new(predictor = adm.imp.predictor,
+                           grid.size = 15)
+
+et = Sys.time()
+print(et-st)
+```
+
+```{r Adm 1 Plot Interactions}
+##Plot the features to see how the interact with any other feature in the data
+# scale 0 - 1 with 1 meaning that 100% of the variance is explained with interactions with the other features
+plot(adm.interact)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
