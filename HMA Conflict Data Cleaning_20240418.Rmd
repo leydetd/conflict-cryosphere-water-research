@@ -1,0 +1,321 @@
+---
+title: "HMA Conflict Data Cleaning"
+author: "David Leydet"
+date: "2024-04-18"
+output:
+ html_document:
+   toc: yes
+   toc_depth: 3
+   theme: yeti
+   toc_float: yes
+---
+
+# **Introduction**
+
+This file and code consolidates my data cleaning steps into one document. This file *does not* include any analysis steps. 
+
+
+```{r Set Working Directory}
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code")
+
+```
+
+
+
+# **Country Level Dataframe**
+
+```{r read in country data}
+## Reminder this data *INCLUDES* imputed conflict counts which was completed in excel
+
+hma.con.df = read.csv("../data/conflict/hma_initial_model_df_v3_20240304.csv")
+
+```
+
+
+```{r Wide to Long}
+## Tidy up the dataframe
+## pivot from wide to long
+
+# load tidyverse library
+library(tidyverse)
+
+## Pivot Longer
+hma.con.df.long = hma.con.df %>% 
+  pivot_longer(
+    cols = -c(country),
+    names_sep = "\\.",
+    names_to = c(".value", "year")
+  )
+
+
+## Check
+head(hma.con.df.long)
+
+```
+
+
+```{r write the file}
+# save the updated data frame to the clean folder
+
+# imputed dataframe
+#write.csv(hma.con.df.long, file = "../cleaned_data/hma_country_df_clean_20240418.csv")
+
+```
+
+
+## **Remove Imputed Years**
+
+This section of code drops observations that use estimated conflict counts for countries without data in ACLED. The list below denotes when data collection began:
+- Afghanistan: 2017
+- Bangladesh: 2010
+- Bhutan: 2020
+- China: 2018
+- India: 2016
+- Kyrgyz Republic: 2018
+- Nepal: 2010
+- Pakistan: 2010
+- Myanmar: 2010
+- Tajikistan: 2018
+- Turkmenistan: 2018
+- Uzbekistan: 2018
+
+```{r Duplicate Dataframe}
+## Duplicate the long dataframe
+con2 = hma.con.df.long
+
+```
+
+
+```{r Subsetting Data}
+##Subset all of the other countries
+
+##subset dataframe based on Afghanistan and years 2017 and on
+afg = subset(con2, con2$country == 'Afghanistan' & con2$year >= 2017)
+
+##subset dataframe based on Bangladesh and years 2010 and on
+ban = subset(con2, con2$country == 'Bangladesh' & con2$year >= 2010)
+
+##subset dataframe based on Bangladesh and years 2020 and on
+bhu = subset(con2, con2$country == 'Bhutan' & con2$year >= 2020)
+
+##subset dataframe based on China and years 2018 and on
+chi = subset(con2, con2$country == 'China' & con2$year >= 2018)
+
+##subset dataframe based on India and years 2016 and on
+ind = subset(con2, con2$country == 'India' & con2$year >= 2016)
+
+##subset dataframe based on Kyrgyz Republic and years 2018 and on
+kyr = subset(con2, con2$country == 'Kyrgyz Republic' & con2$year >= 2018)
+
+##subset dataframe based on Nepal and years 2010 and on
+nep = subset(con2, con2$country == 'Nepal' & con2$year >= 2010)
+
+##subset dataframe based on Pakistan and years 2010 and on
+pak = subset(con2, con2$country == 'Pakistan' & con2$year >= 2010)
+
+##subset dataframe based on Myanmar and years 2010 and on
+mya = subset(con2, con2$country == 'Myanmar' & con2$year >= 2010)
+
+##subset dataframe based on Tajikistan and years 2010 and on
+taj = subset(con2, con2$country == 'Tajikistan' & con2$year >= 2018)
+
+##subset dataframe based on Turkmenistan and years 2010 and on
+tur = subset(con2, con2$country == 'Turkmenistan' & con2$year >= 2018)
+
+##subset dataframe based on Uzbekistan and years 2010 and on
+uzb = subset(con2, con2$country == 'Uzbekistan' & con2$year >= 2018)
+
+```
+
+
+```{r List and Merge}
+##Merge all of the countries back together into one dataframe
+
+##Merge by rows using rbind
+con.reduced = rbind(afg, ban, bhu, chi, ind, kyr, nep, pak, mya, taj, tur, uzb)
+
+##Check
+#view(con.reduced)
+```
+
+
+```{r write con reduced}
+# save the clean data frame to the clean folder
+#write.csv(con.reduced, file = "../cleaned_data/hma_country_non_imp_df_clean_20240418.csv")
+
+```
+
+
+
+
+# **Administrative Level 1 Dataframe**
+
+**Note:**
+
+- 2022 population was imputed in excel using a standard growth rate calculation
+- nlights 2010, 2011, 2021, and 2022 are missing
+- Conflict counts by country/year are missing:
+    + Afghanistan: 2017
+    + Bangladesh: 2010
+    + Bhutan: 2020
+    + China: 2018
+    + India: 2016
+    + Kyrgyz Republic: 2018
+    + Nepal: 2010
+    + Pakistan: 2010
+    + Myanmar: 2010
+    + Tajikistan: 2018
+    + Turkmenistan: 2018
+    + Uzbekistan: 2018
+
+```{r read in adm 1 data}
+## Load the data frame with adm level 1
+# 2022 population was imputed in excel using a standard growth rate calculation
+# nlights 2010, 2011, 2021, and 2022 are missing
+# conflict counts by country/year are missing
+
+hma.con.prov = read.csv("../data/conflict/hma_df_provinces_20240318.csv")
+
+```
+
+
+
+```{r Complete df tidy - Provinces}
+## Tidy up the dataframe
+## pivot from wide to long
+## Pivot Longer
+
+hma.con.prov.long = hma.con.prov %>% 
+  pivot_longer(
+    cols = -c(country, adm1),
+    names_sep = "\\.",
+    names_to = c(".value", "year")
+  )
+
+
+## Check
+head(hma.con.prov.long)
+
+```
+
+## **Non-imputed Data Frame**
+
+```{r filter NAs}
+# filter out rows with NAs
+prov.new = hma.con.prov.long %>% 
+  filter(nlights != "NA") %>% 
+  filter(con != "NA")
+
+# check to ensure no NAs are in the data frame
+summary(prov.new)
+```
+
+
+```{r write non imputed df}
+# write the non-imputed data frame to csv
+#write.csv(prov.new, file = "../cleaned_data/hma_adm1_non_imp_df_clean_20240418.csv")
+
+```
+
+
+## **Imputation Data Frame**
+
+The following imputation uses the missForest R package. Details on the imputation procedures can be found [here](https://cran.r-project.org/web/packages/missForest/missForest.pdf).
+
+**Note:** missForest requires the use of a data frame object (not a tibble), factors (not characters) for non-numeric data, and cannot impute with a large number of classes. In this case we change country, adm1, and year in to factors or numerics. We subsequently removed the adm1 from the data frame for imputation, then return it afterwards.
+
+Additionally, the missForest object stores two things:
+1. ximp - this contains the imputed data frame.
+2. OOB Error - this is the Normalized RMSE error associated with the imputation. 
+
+```{r missForest}
+#Load missForest
+library(missForest)
+
+```
+
+
+```{r impute using missForest 1}
+# create a new data frame
+prov.imp.temp = hma.con.prov.long
+
+##Convert Characters into factors
+prov.imp.temp$country = as.factor(prov.imp.temp$country)
+prov.imp.temp$adm1 = as.factor(prov.imp.temp$adm1)
+prov.imp.temp$year = as.numeric(prov.imp.temp$year)
+
+##Convert to a dataframe (not tibble) for missForest
+prov.imp.temp = as.data.frame(prov.imp.temp)
+
+##Remove the adm1 levels for missForest to run correctly
+hma.prov.ex = subset(prov.imp.temp, select = -adm1)
+
+
+```
+
+```{r impute using missForest 2}
+
+##Impute using missForest
+prov.miss.forest = missForest(hma.prov.ex)
+          
+
+##Check object
+##two portions
+# ximp = stores the imputed data frame
+# OOBerror stores the error associated with the imputation
+summary(prov.miss.forest)
+```
+
+
+```{r Check Imputation}
+
+##Check the imputation to see how well it did
+##nlights
+plot(density(hma.prov.ex$nlights, na.rm=TRUE))
+lines(density(prov.miss.forest$ximp$nlights), col = "red", lty = 2)
+
+##conflict
+plot(density(hma.prov.ex$con, na.rm=TRUE))
+lines(density(prov.miss.forest$ximp$con), col = "red", lty = 2)
+
+```
+
+
+```{r New Dataframe for the Random Forest}
+##Create a new dataframe with the imputed values
+prov.df = prov.miss.forest$ximp
+
+##Add back in the adm1
+prov.df$adm1 = hma.con.prov.long$adm1
+
+##relocate adm1 column after country
+prov.df = prov.df %>% 
+  relocate(adm1, .after = country)
+
+##Check
+str(prov.df)
+
+```
+
+```{r write prov.df}
+##write the finished dataframe to a new csv
+#write.csv(prov.df, file = "../cleaned_data/hma_adm1_imp_df_clean_20240418.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
