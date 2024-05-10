@@ -27,6 +27,8 @@ setwd("~/Desktop/University of Utah PhD /Research/r_code/")
 ## **Imputed Data Read and Adjustment**
 
 ```{r Adm1 Data}
+library(tidyverse)
+
 # load cleaned data
 adm.imp = read.csv("../cleaned_data/hma_adm1_imp_df_clean_20240418.csv")
 
@@ -64,6 +66,8 @@ plot(adm.imp$year, adm.imp$con)
 
 
 ```{r Adm 1 Histogram of variables}
+library(ggplot2)
+library(ggpubr)
 ## Check the histogram of variables for normality
 
 ## Gross domestic product proxy - nighttime lights
@@ -340,7 +344,7 @@ rf.voice$center(min(adm.imp.rf.df$voice))
 # plot
 p1 = plot(rf.pop) + ggtitle("Population PDP/ICE Plot")
 p2 = plot(rf.country) + ggtitle("Country PDP/ICE Plot")
-p3 = plot(rf.temp) + ggtitle("Temperatire PDP/ICE Plot")
+p3 = plot(rf.temp) + ggtitle("Temperature PDP/ICE Plot")
 p4 = plot(rf.precip) + ggtitle("Precipitation PDP/ICE Plot")
 
 gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
@@ -493,7 +497,7 @@ print(c(mod1.rsq, mod2.rsq))
 
 ```
 
-### *Non-Imp iml Objects and Interpretations**
+### **Non-Imp iml Objects and Interpretations**
 
 ```{r Non Imp Predictor Object}
 ## Create a data frame with the features minus the target
@@ -559,6 +563,668 @@ print(et-st)
 plot(nonimp.interact)
 
 ```
+
+
+### **Surrogate Model**
+
+```{r Non Imp Surrogate Model}
+
+tree.nonimp = TreeSurrogate$new(predictor = adm.nonimp.predictor,
+                         maxdepth = 2)
+
+
+# Visualize
+plot(tree.nonimp)
+
+```
+
+```{r Non Imp Surrogate Tree Viz}
+# visualize the simplified tree
+
+plot(tree.nonimp$tree)
+
+```
+
+```{r Non Imp Surrogate R Squared}
+# How well does the surrogate model do at predicting conflict
+print(tree.nonimp$r.squared)
+
+```
+
+
+
+# **Country Level Analysis (Imputed Data)**
+
+This analysis was performed on a dataframe that was imputed using a mean-by-country approach.
+
+```{r Country Imp Data}
+# read in the data
+country.imp = read.csv("../cleaned_data/hma_country_df_clean_20240418.csv")
+
+str(country.imp)
+
+country.imp = country.imp |>
+  select(-X) |>
+  mutate(country = as.factor(country))
+
+# check
+str(country.imp)
+
+```
+
+## **Random Forest**
+
+```{r Country Imp RF}
+
+st = Sys.time()
+
+# Train the random forest 
+set.seed(923)
+country.imp.rf = randomForest(con ~ ., data = country.imp)
+
+et = Sys.time()
+elapsed = et-st
+print(elapsed)
+
+```
+
+```{r Country Imp R Squared}
+## pseudo r2 value
+mean(country.imp.rf$rsq)
+
+## RMSE 
+c.imp.rmse = sqrt(mean(country.imp.rf$mse))
+
+## percentage error
+
+c.imp.rmse / diff(range(country.imp$con))
+
+##*NOTE* Followup with Simon/Andrew on this -
+##*does using the difference instead of mean conflict count mean we will likely over predict low conflict areas???
+
+# R2 is great..mean calculation of error is not so great...calculating it on the range is good.
+```
+
+## **iml Predictor**
+
+```{r Country Imp Predictor DF}
+## Create a data frame with the features minus the target
+country.imp.pred.df = country.imp %>% 
+  select(-con)
+
+```
+
+
+```{r Country Imp Predictor}
+# Store the data and con in the predictor container along with the randomForest parameters
+country.imp.predictor = Predictor$new(model = country.imp.rf,
+                                      data = country.imp.pred.df,
+                                      y = country.imp$con)
+```
+
+
+```{r Country Imp Importance Object}
+## Store the features in a FeatureImp object
+## loss argument specifies the performance measure for error
+country.imp.importance = FeatureImp$new(predictor = country.imp.predictor,
+                                        loss = "rmse")
+
+```
+
+
+```{r Country Imp Importance Plot}
+##Plot
+plot(country.imp.importance)
+
+```
+
+
+```{r Country Imp ALE Plots}
+country.imp.ale = FeatureEffect$new(predictor = country.imp.predictor,
+                                    feature = "rol",
+                                    grid.size = 10)
+
+country.imp.ale$plot()
+
+```
+
+```{r Country Imp ALE Effects Plot ALL}
+##Plot all of the feature effects at once
+
+country.imp.effs = FeatureEffects$new(predictor = country.imp.predictor,
+                                      grid.size = 10)
+
+# Visualize
+plot(country.imp.effs)
+```
+
+
+```{r Country Imp PDPs, warning=FALSE}
+
+#PDPs
+country.imp.rf.rol = Partial$new(predictor = country.imp.predictor,
+                     feature = "rol",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+country.imp.rf.country = Partial$new(predictor = country.imp.predictor,
+                     feature = "country",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+country.imp.rf.polstab = Partial$new(predictor = country.imp.predictor,
+                     feature = "polstab",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+country.imp.rf.pop = Partial$new(predictor = country.imp.predictor,
+                     feature = "pop",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+country.imp.rf.cd = Partial$new(predictor = country.imp.predictor,
+                     feature = "cd",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+country.imp.rf.voice = Partial$new(predictor = country.imp.predictor,
+                     feature = "voice",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+
+# center (this centers the impact of y hat on a starting value)
+country.imp.rf.rol$center(min(country.imp$rol))
+country.imp.rf.polstab$center(min(country.imp$polstab))
+country.imp.rf.pop$center(min(country.imp$pop))
+country.imp.rf.cd$center(min(country.imp$cd))
+country.imp.rf.voice$center(min(country.imp$voice))
+
+
+
+```
+
+```{r Country Imp PDP Plots All}
+library(gridExtra)
+
+p1 = plot(country.imp.rf.rol) + ggtitle("Rule of Law PDP/ICE Plot")
+p2 = plot(country.imp.rf.country) + ggtitle("Country PDP/ICE Plot")
+p3 = plot(country.imp.rf.polstab) + ggtitle("Political Stability PDP/ICE Plot")
+p4 = plot(country.imp.rf.pop) + ggtitle("Population PDP/ICE Plot")
+p5 = plot(country.imp.rf.cd) + ggtitle("Climate Disasters PDP/ICE Plot")
+p6 = plot(country.imp.rf.voice) + ggtitle("Voice PDP/ICE Plot")
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 2)
+```
+
+
+
+```{r Country Imp Interaction}
+country.imp.interact = Interaction$new(predictor = country.imp.predictor,
+                               grid.size = 15)
+
+et = Sys.time()
+print(et-st)
+
+##Plot the features to see how the interact with any other feature in the data
+# scale 0 - 1 with 1 meaning that 100% of the variance is explained with interactions with the other features
+plot(country.imp.interact)
+
+```
+## **Surrogate Model**
+
+```{r Country Imp Surrogate}
+# Surrogate Model
+
+country.imp.tree = TreeSurrogate$new(predictor = country.imp.predictor,
+                                      maxdepth = 2)
+
+
+# Visualize
+plot(country.imp.tree)
+
+```
+
+
+```{r Country Imp Surrogate Visualization}
+
+# Visualize Simplified version
+plot(country.imp.tree$tree)
+
+```
+
+
+```{r Country Imp Surrogate Performance}
+
+## Check the model performance 
+
+print(country.imp.tree$r.squared)
+
+```
+
+
+
+
+
+# **Country Level Analysis (Imputed with missForest)**
+
+This analysis was performed using a data frame imputed using missForest.
+
+
+```{r mf Country Imp Data}
+# read in the data
+mf.country.imp = read.csv("../cleaned_data/hma_country_MF_impute_df_clean_20240424.csv")
+
+str(mf.country.imp)
+
+mf.country.imp = mf.country.imp |>
+  select(-X) |>
+  mutate(country = as.factor(country))
+
+# check
+str(mf.country.imp)
+
+```
+
+## **Random Forest**
+
+```{r mf Country Imp RF}
+
+st = Sys.time()
+
+# Train the random forest 
+set.seed(764)
+mf.country.imp.rf = randomForest(con ~ ., data = mf.country.imp)
+
+et = Sys.time()
+elapsed = et-st
+print(elapsed)
+
+```
+
+```{r mf Country Imp R Squared}
+## pseudo r2 value
+mean(mf.country.imp.rf$rsq)
+
+## RMSE 
+mf.c.imp.rmse = sqrt(mean(mf.country.imp.rf$mse))
+
+## percentage error
+
+mf.c.imp.rmse / diff(range(mf.country.imp$con))
+
+##*NOTE* Followup with Simon/Andrew on this -
+##*does using the difference instead of mean conflict count mean we will likely over predict low conflict areas???
+
+# R2 is great..mean calculation of error is not so great...calculating it on the range is good.
+```
+
+## **iml Predictor**
+
+```{r mf Country Imp Predictor DF}
+## Create a data frame with the features minus the target
+mf.country.imp.pred.df = mf.country.imp %>% 
+  select(-con)
+
+```
+
+
+```{r mf Country Imp Predictor}
+# Store the data and con in the predictor container along with the randomForest parameters
+mf.country.imp.predictor = Predictor$new(model = mf.country.imp.rf,
+                                      data = mf.country.imp.pred.df,
+                                      y = mf.country.imp$con)
+```
+
+
+```{r mf Country Imp Importance Object}
+## Store the features in a FeatureImp object
+## loss argument specifies the performance measure for error
+mf.country.imp.importance = FeatureImp$new(predictor = mf.country.imp.predictor,
+                                        loss = "rmse")
+
+```
+
+
+```{r mf Country Imp Importance Plot}
+##Plot
+plot(mf.country.imp.importance)
+
+```
+
+
+```{r mf Country Imp ALE Plots}
+mf.country.imp.ale = FeatureEffect$new(predictor = mf.country.imp.predictor,
+                                    feature = "rol",
+                                    grid.size = 10)
+
+mf.country.imp.ale$plot()
+
+```
+
+```{r mf Country Imp ALE Effects Plot ALL}
+##Plot all of the feature effects at once
+
+mf.country.imp.effs = FeatureEffects$new(predictor = mf.country.imp.predictor,
+                                      grid.size = 10)
+
+# Visualize
+plot(mf.country.imp.effs)
+```
+
+
+```{r mf Country Imp PDPs, warning=FALSE}
+
+#PDPs
+mf.country.imp.rf.rol = Partial$new(predictor = mf.country.imp.predictor,
+                     feature = "rol",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+mf.country.imp.rf.country = Partial$new(predictor = mf.country.imp.predictor,
+                     feature = "country",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+mf.country.imp.rf.polstab = Partial$new(predictor = mf.country.imp.predictor,
+                     feature = "polstab",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+mf.country.imp.rf.pop = Partial$new(predictor = mf.country.imp.predictor,
+                     feature = "pop",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+mf.country.imp.rf.cd = Partial$new(predictor = mf.country.imp.predictor,
+                     feature = "cd",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+mf.country.imp.rf.voice = Partial$new(predictor = mf.country.imp.predictor,
+                     feature = "voice",
+                     aggregation = "pdp",
+                     ice = TRUE)
+
+
+# center (this centers the impact of y hat on a starting value)
+mf.country.imp.rf.rol$center(min(mf.country.imp$rol))
+mf.country.imp.rf.polstab$center(min(mf.country.imp$polstab))
+mf.country.imp.rf.pop$center(min(mf.country.imp$pop))
+mf.country.imp.rf.cd$center(min(mf.country.imp$cd))
+mf.country.imp.rf.voice$center(min(mf.country.imp$voice))
+
+
+
+```
+
+```{r mf Country Imp PDP Plots All}
+library(gridExtra)
+
+mf.p1 = plot(mf.country.imp.rf.rol) + ggtitle("Rule of Law PDP/ICE Plot")
+mf.p2 = plot(mf.country.imp.rf.country) + ggtitle("Country PDP/ICE Plot")
+mf.p3 = plot(mf.country.imp.rf.polstab) + ggtitle("Political Stability PDP/ICE Plot")
+mf.p4 = plot(mf.country.imp.rf.pop) + ggtitle("Population PDP/ICE Plot")
+mf.p5 = plot(mf.country.imp.rf.cd) + ggtitle("Climate Disasters PDP/ICE Plot")
+mf.p6 = plot(mf.country.imp.rf.voice) + ggtitle("Voice PDP/ICE Plot")
+
+grid.arrange(mf.p1, mf.p2, mf.p3, mf.p4, mf.p5, mf.p6, nrow = 2)
+```
+
+
+
+```{r mf Country Imp Interaction}
+mf.country.imp.interact = Interaction$new(predictor = mf.country.imp.predictor,
+                               grid.size = 15)
+
+et = Sys.time()
+print(et-st)
+
+##Plot the features to see how the interact with any other feature in the data
+# scale 0 - 1 with 1 meaning that 100% of the variance is explained with interactions with the other features
+plot(mf.country.imp.interact)
+
+```
+## **Surrogate Model**
+
+```{r mf Country Imp Surrogate}
+# Surrogate Model
+
+mf.country.imp.tree = TreeSurrogate$new(predictor = mf.country.imp.predictor,
+                                      maxdepth = 2)
+
+
+# Visualize
+plot(mf.country.imp.tree)
+
+```
+
+
+```{r mf Country Imp Surrogate Visualization}
+
+# Visualize Simplified version
+plot(mf.country.imp.tree$tree)
+
+```
+
+
+```{r mf Country Imp Surrogate Performance}
+
+## Check the model performance 
+
+print(mf.country.imp.tree$r.squared)
+
+```
+
+
+
+# **Country Level Analysis (Non-Imputed Data)**
+
+```{r Country Non Imp}
+# Read in the clean data frame
+country.nonimp = read.csv("../cleaned_data/hma_country_non_imp_df_clean_20240418.csv")
+
+# Remove X and change country to a factor
+country.nonimp = country.nonimp %>% 
+  select(-X) %>% 
+  mutate(country = as.factor(country))
+
+# check
+summary(country.nonimp)
+
+```
+
+Note: We need to remove the NAs from the dataframe before running the random forest. I fixed the orignal csv file that accidentally introduced NAs into the dataframe. 
+
+```{r Country Non Imp NA Drop}
+#drop_na from tidyr to filter out columns with nas 
+
+#country.nonimp.cleaned = country.nonimp |>
+  #drop_na()
+
+
+# check
+#summary(country.nonimp.cleaned)
+
+```
+
+
+
+## **Random Forest**
+
+```{r Country Non Imp RF}
+
+st = Sys.time()
+
+# Train the random forest 
+set.seed(429)
+country.nonimp.rf = randomForest(con ~ ., data = country.nonimp)
+
+et = Sys.time()
+elapsed = et-st
+print(elapsed)
+
+```
+
+```{r Country Non Imp R Squared}
+## pseudo r2 value
+mean(country.nonimp.rf$rsq)
+
+## RMSE 
+country.nonimp.rmse = sqrt(mean(country.nonimp.rf$mse))
+
+## percentage error
+
+country.nonimp.rmse / diff(range(country.nonimp$con))
+
+##*NOTE* Followup with Simon/Andrew on this -
+##*does using the difference instead of mean conflict count mean we will likely over predict low conflict areas???
+
+# R2 is great..mean calculation of error is not so great...calculating it on the range is good.
+```
+
+## **iml Predictor**
+
+```{r Country Non Imp Predictor DF}
+## Create a data frame with the features minus the target
+country.nonimp.pred.df = country.nonimp %>% 
+  select(-con)
+
+```
+
+
+```{r Country NonImp Predictor}
+# Store the data and con in the predictor container along with the randomForest parameters
+country.nonimp.predictor = Predictor$new(model = country.nonimp.rf,
+                                      data = country.nonimp.pred.df,
+                                      y = country.nonimp$con)
+```
+
+
+```{r Country Non Imp Importance Object}
+## Store the features in a FeatureImp object
+## loss argument specifies the performance measure for error
+country.nonimp.importance = FeatureImp$new(predictor = country.nonimp.predictor,
+                                        loss = "rmse")
+
+```
+
+
+```{r Country Non Imp Importance Plot}
+##Plot
+plot(country.nonimp.importance)
+
+```
+
+
+## **Surrogate Model**
+
+```{r Country NonImp Surrogate}
+# Surrogate Model
+
+country.nonimp.tree = TreeSurrogate$new(predictor = country.nonimp.predictor,
+                                      maxdepth = 2)
+
+
+# Visualize
+plot(country.nonimp.tree)
+
+```
+
+
+```{r Country NonImp Surrogate Visualization}
+
+# Visualize Simplified version
+plot(country.nonimp.tree$tree)
+
+```
+
+
+```{r Country NonImp Surrogate Performance}
+
+## Check the model performance 
+
+print(country.nonimp.tree$r.squared)
+
+```
+
+
+
+# **Figures and General Summary Statistics**
+
+```{r Plot by Country}
+## Visualize using ggplot
+## Reminder - i used the average conflict to negate 0 values for years with no data
+
+con.plot = ggplot(data = country.nonimp, aes(x = year, y = con, color = country)) +
+  geom_point() +
+  geom_line(lwd = 1.2) +
+  geom_smooth(method = "lm",
+              se = FALSE) +
+  facet_wrap(~country, scales = "free") +
+  scale_x_continuous(breaks = c(seq(from = 2010, to = 2022, by = 1))) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  labs(title = "Total Conflict Count (2010-2022)",
+       color = "Country") +
+  xlab("Year") +
+  ylab("Conflict Count")
+  
+
+## View
+con.plot
+```
+
+
+
+
+
+
+
+## **Summary Statistics**
+
+```{r Summary Statistics - Country}
+
+country.summary = country.imp %>% 
+  summarize(sd.con = sd(con),
+            sd.gdp = sd(gdp),
+            sd.pop = sd(pop),
+            sd.temp = sd(temp),
+            sd.cd = sd(cd),
+            sd.ge = sd(ge),
+            sd.cpt = sd(cpt),
+            sd.rol = sd(rol),
+            sd.rq = sd(rq),
+            sd.pol = sd(polstab),
+            sd.voice = sd(voice),
+            sd.urban = sd(urbanpop),
+            sd.water = sd(waterwith))
+
+
+#print
+country.summary
+
+```
+
+
+```{r Summary Statistics - ADM1}
+
+adm1.summary = adm.imp %>% 
+  summarize(sd.nlights = sd(nlights),
+            sd.pop = sd(pop),
+            sd.temp = sd(temp),
+            sd.precip = sd(precip),
+            sd.con = sd(con))
+
+#print
+print(adm1.summary)
+
+```
+
+
+
+
+
+
 
 
 
