@@ -1,0 +1,2034 @@
+---
+title: "Pakistan Conflict Modeling"
+author: "David Leydet"
+date: "2023-04-05"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+
+
+# **Introduction**
+
+The purpose of this document is to explore different modeling approaches with the compiled Pakistan Conflict data set. The .rmd file "pak_conflict_urban_20230325.Rmd" hosts the code for data wrangling.
+
+
+```{r Setup}
+
+##Set working directory
+##r code is the same level as data
+##data has the following subfolders - conflict, IPUMS, NASA HiMAT, population, Suicide, and Water Basins
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code")
+
+```
+
+```{r Library Load, message=FALSE}
+## Load applicable libraries
+
+library(mapview) #mapping package
+library(raster) #raster data manipulation (Climate Data)
+library(RColorBrewer) #color palettes for visualization
+library(sf) #simple features for spatial data
+library(tmap) #mapping package
+library(viridis) #color palette for visualization
+library(ncdf4) #working with netCDF files (Climate Data)
+library(leaflet) #basemaps for mapview
+library(ggplot2) #better figures
+library(ggcorrplot) #Load the correlation plot package
+library(plotly) #interactive figures
+library(maps) #mapping 
+library(kableExtra) #creating better tables and outputs
+library(dplyr) #count and data functions
+library(reshape2) ## Package used to reformat data - wide to long
+library(tidyverse) ##Formatting dataframes, merge, and join
+library(stargazer) ##Formatting model outputs to tables
+library(pscl) ##Used to calculate pseudo r^2 values for log regression models (poisson)
+library(janitor) ##Used to count/provide summaries for dataframes
+library(jtools) ##Used to produce aesthetically pleasing model output tables
+library(huxtable) ##Used in conjunction with jtools to export model outputs
+library(flextable) ##Needed to knit. linked to the janitor library
+library(geomerge) ##Merges conducts a series of spatial joins to combine geospatial data ##Andrew Linke recommendation!!
+library(tidyr) ##reshaping data formats long/wide
+library(lubridate) ##Helps dealing with date/time ##Needed for geomerge
+library(kohonen) #self organizing maps
+library(ggpubr) ##publication ready tables
+library(stats) ##Stats functions
+library(lme4) ##linear mixed effects model
+
+
+```
+
+
+
+```{r Complete df Read}
+## Read in the "wrangled" long format dataframe from "pak_conflict_urban_20230325.Rmd"
+
+con.df = read.csv("../data/conflict/complete_dataframe_long_20230405.csv")
+
+## Check
+#head(con.df)
+#names(con.df)
+
+## Drop the X column
+con.df = con.df[,-1]
+
+## Check
+names(con.df)
+
+```
+
+
+
+```{r Extract the coordinates}
+## Remove the coordinates from the dataframe
+
+
+```
+
+
+
+```{r Ratio calculations}
+## Add new variables/features that are ratios/normalized for populations. 
+## **Note** Need to impute the 2022 population before calculating these ratios!!!!
+
+## Impute the population for 2022 - completed this in the data wrangling script
+
+
+con.df = con.df %>% 
+  mutate(total.con.percapita = total.con/pop) %>% 
+  mutate(protests.percapita = protests/pop) %>% 
+  mutate(battles.percapita = battles/pop) %>% 
+  mutate(expl.percapita = expl/pop) %>% 
+  mutate(riots.percapita = protests/pop) %>% 
+  mutate(vac.percapita = vac/pop) %>% 
+  mutate(sd.percapita = sd/pop) 
+
+
+## Check
+head(con.df)
+
+```
+
+
+```{r Summary df check}
+## Check for NAs
+
+summary(con.df)
+
+## Missing SPEI values for 2022
+## For testing sake imputing just the median
+
+#con.df$spei[is.na(con.df$spei)] = median(con.df$spei, na.rm = TRUE)
+
+
+```
+
+
+
+```{r Histogram of the variables/features}
+## Create a histogram of the features
+
+h1 = con.df %>% 
+  gghistogram(x = "pop")
+  
+h2 = con.df %>% 
+  gghistogram(x = "spei")
+
+h3 = con.df %>% 
+  gghistogram(x = "dep.index")
+
+h4 = con.df %>% 
+  gghistogram(x = "built")
+
+h5 = con.df %>% 
+  gghistogram(x = "total.con")
+
+## Visualize 
+ggarrange(h1, h2, h3, h4, h5)
+
+## SPEI is normally distributed
+
+```
+
+
+```{r Histogram of the variables/features - 2}
+## Create a histogram of the features
+
+h6 = con.df %>% 
+  gghistogram(x = "total.con.percapita")
+  
+h7 = con.df %>% 
+  gghistogram(x = "protests.percapita")
+
+h8 = con.df %>% 
+  gghistogram(x = "battles.percapita")
+
+h9 = con.df %>% 
+  gghistogram(x = "expl.percapita")
+
+h10 = con.df %>% 
+  gghistogram(x = "riots.percapita")
+
+h11 = con.df %>% 
+  gghistogram(x = "vac.percapita")
+
+h12 = con.df %>% 
+  gghistogram(x = "sd.percapita")
+
+## Visualize 
+ggarrange(h6, h7, h8, h9, h10, h11, h12)
+
+
+```
+
+
+```{r Histogram of the variables/features - 3}
+## Create a histogram of the features
+
+h13 = con.df %>% 
+  gghistogram(x = "temp.jan")
+  
+h14 = con.df %>% 
+  gghistogram(x = "temp.apr")
+
+h15 = con.df %>% 
+  gghistogram(x = "temp.jul")
+
+h16 = con.df %>% 
+  gghistogram(x = "temp.oct")
+
+h17 = con.df %>% 
+  gghistogram(x = "precip.jan")
+
+h18 = con.df %>% 
+  gghistogram(x = "precip.apr")
+
+h19 = con.df %>% 
+  gghistogram(x = "precip.jul")
+
+h20 = con.df %>% 
+  gghistogram(x = "precip.oct")
+
+
+## Visualize 
+ggarrange(h13, h14, h15, h16, h17, h18, h19, h20)
+
+
+```
+
+**Note:** 
+
+A few of our variables/features are skewed so we will log transform them and scale them before our analysis. 
+
+
+```{r Log Transformation and Scaling 1}
+
+## SPEI Creates NaNs of you try to log transform - plus it is normally distributed
+## log transforming 0 results in NaNs
+## Reminder scale() in R converts to z-scores
+## Maybe min/max scaling is the way?
+
+var.names = c("pop", "dep.index", "built", "total.con", "protests", "battles", "expl", "riots", "vac", "sd", "total.con.percapita", "protests.percapita", "battles.percapita", "expl.percapita", "riots.percapita", "vac.percapita", "sd.percapita", "temp.jan", "temp.apr", "temp.jul", "temp.oct", "precip.jan", "precip.apr", "precip.jul", "precip.oct")
+
+
+## Create a helper function to log transform
+## Courtesy of Simon
+
+## inverse hyperbolic sin transformation
+# This should work with -ve and +ve values (and zeros!). In R you can do this with:
+
+ihs <- function(x) {
+ y <- log(x + sqrt(x^2 + 1))
+  return(y)
+}
+
+## back transform with
+hs = function(x) {
+  0.5*exp(-x)*(exp(2*x) - 1)
+}
+
+## Create a new data frame with the log transformed and scaled data
+
+con.df.scale = con.df %>% 
+  mutate_at(var.names, ihs)
+
+ 
+
+## Check
+head(con.df.scale)
+
+```
+
+
+```{r Con.df Scaled Histogram Check}
+## Check a few variables to see if the variables are still skewed
+
+h.precip = con.df.scale %>% 
+  gghistogram(x = "precip.oct")
+
+h.temp = con.df.scale %>% 
+  gghistogram(x = "temp.apr")
+
+h.pop = con.df.scale %>% 
+  gghistogram(x = "pop")
+
+ggarrange(h.precip, h.temp, h.pop)
+
+```
+
+**Note:** 
+The IHS transformation did not really take out the skew of our variables
+
+```{r Useful Transformation Scripts}
+## This code is from Simon and can be used for data transformations
+
+## modified log transformation
+#log(x+1)
+#means that a zero remains a zero. But if your values are quite large you can get a weird spike at some distance from the rest of the data
+
+#log(x + (min(x) / 2))
+# this avoids the weird spike
+
+## inverse hyperbolic sin transformation
+# This should work with -ve and +ve values (and zeros!). In R you can do this with:
+
+#ihs <- function(x) {
+ #y <- log(x + sqrt(x^2 + 1))
+  #return(y)
+#}
+
+## back transform with
+#hs = function(x) {
+  #0.5*exp(-x)*(exp(2*x) - 1)
+#}
+
+```
+
+
+
+```{r Find NAs}
+## Find the NAs
+#test.df.nas = test.df %>% 
+  #filter_all(any_vars(. %in% c(NA)))
+
+## Check
+#test.df.nas
+
+```
+
+
+
+
+```{r Scale the con.df.scale dataframe}
+## Use minmax scaling
+
+## Define the maxs
+maxs = apply(con.df.scale[ , c(var.names, "spei")], 2, max)
+
+## Define the mins
+mins = apply(con.df.scale[ , c(var.names, "spei")], 2, min)
+
+## Build a dataframe with the scaled features
+scaled.features = as.data.frame(scale(con.df.scale[ , c(var.names, "spei")],
+                                      center = mins,
+                                      scale = maxs-mins))
+
+
+## Rebuild the complete dataframe (without the lat/long)
+con.df.scale.v2 = data.frame(districts = con.df$districts, year = con.df$year, scaled.features)
+
+
+## Check
+summary(con.df.scale.v2)
+
+
+## Great - No NAs, everything is scaled
+## Interpretation note - how does this affect spei??
+## Scaling year?
+
+
+```
+
+
+
+# **Self Organizing Map**
+
+## **Conflict Only**
+
+```{r Build SOM Grid}
+## Build the SOM grid
+## rule of thumb to initializing the grid is:
+## pick a high number (5*sqrt(n)) where n is the number of observations
+## In this case, 5*sqrt(2080) 228 nodes
+
+## Initialize a grid of 300 nodes
+## Second run - 225 nodes
+som_grid = somgrid(xdim = 15,
+                   ydim = 15, 
+                   topo = "hexagonal")
+
+```
+
+
+```{r SOM - Dataframe to Matrix}
+## SOMs require a matrix object to run
+
+## Conflict variable
+
+
+## Convert the dataframe to a matrix
+con.mat = as.matrix(con.df.scale.v2[ ,6:12])
+
+## Pass this to train the SOM function
+## Set seed to reproduce results
+set.seed(1)
+con.som = som(con.mat, som_grid,
+              rlen = 1000)
+
+```
+
+
+
+```{r SOM - Loss Function}
+## Check to see if the algorithm has converged
+## If not you may need to run more iterations (rlen =) argument
+
+plot(con.som,
+     type = "changes")
+
+## Converged after 1000 runs
+
+```
+
+## **SOM Plots**
+
+```{r Distance Plot}
+## Plot the distance between nodes
+## Used to check for outliers
+
+plot(con.som, type = "dist")
+
+
+## Potential outliers? Upper left corner?
+
+```
+
+
+
+```{r Count Plot}
+## Check the number of observations per clusters
+## Used to look for empty nodes
+
+plot(con.som, type = "counts")
+
+
+## Perhaps a smaller grid is necessary?
+## several empty clusters
+
+```
+
+
+
+```{r Code Plot}
+## Plot the codebook vectors
+## These are the weights associated with each feature and can be used to interpret the organization of the SOM
+
+
+plot(con.som, type = "code")
+
+```
+
+
+### **Feature Plots**
+
+```{r Define a Heat Map Palette}
+## Define a Palette
+heat.pal = function(n, pal= "Spectral") {
+  rev(brewer.pal(n, pal))
+}
+
+
+## Use viridis for SOM
+library(viridis)
+```
+
+```{r Test Color Function}
+## Test
+plot(con.som,
+     type="property",
+     property = con.som$codes[[1]][,"total.con"], 
+     palette.name=heat.pal, 
+     ncolors=9,
+     main = "Total Conflict",
+     shape = "straight")
+
+
+```
+
+
+```{r Total Con Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"total.con"],
+     main = "Total Conflict",
+     palette.name = turbo)
+
+```
+
+
+```{r Battles Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"battles"],
+     main = "Battles",
+     palette.name = turbo)
+
+```
+
+
+
+```{r Protests Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"protests"],
+     main = "protests",
+     palette.name = turbo)
+
+```
+
+
+```{r Explosions Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"expl"],
+     main = "Explosions",
+     palette.name = turbo)
+
+```
+
+
+```{r Riots Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"riots"],
+     main = "Riots",
+     palette.name = turbo)
+
+```
+
+
+
+```{r Violence Against Civ Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"vac"],
+     main = "Violence Against Civilians",
+     palette.name = turbo)
+
+```
+
+
+```{r Strategic Development Plot}
+## Feature plots
+
+plot(con.som, 
+     type = "property", 
+     property = con.som$codes[[1]][,"sd"],
+     main = "Strategic Development",
+     palette.name = turbo)
+
+```
+
+
+## **Cluster Analysis**
+
+
+```{r Number of Clusters}
+## For kmeans - calculate the optimal number of clusters
+library(cluster)
+library(fpc) ##For the Calin-Hara index
+
+source("../r_code/scripts/conflict_cluster_num_script.R")
+
+```
+
+
+```{r Number of Clusters - Visualization}
+## Visualize
+
+plot(1:20,ch.out, type = 'b', lwd = 2,
+     xlab = "N Groups", ylab = "C", main = "Calinski-Harabasz index")
+
+## 2 seems like the CH solution although 5/6 may be better?
+```
+
+
+```{r Hierarchical Clustering - 1}
+## Lets start with hierarchical clustering 
+
+## First calculate the dissimilarity matrix between the values (codes) of each SOM nodes.
+dist_codes = dist(con.som$codes[[1]])
+
+
+## Use cutree and hclust to form the hierarchical clusters (start with 6)
+con_cluster = cutree(hclust(dist_codes), 6)
+
+```
+
+
+```{r Hierarchical Clustering - 2}
+## Visualize the SOM grid with the clusters
+
+## Color Palette
+my.pal = brewer.pal(n = 6,
+                    "Dark2")
+
+
+## Visualize
+plot(con.som, type="mapping", 
+     bgcol = my.pal[con_cluster], 
+     main = "Clusters", 
+     pch = '.') 
+add.cluster.boundaries(con.som, con_cluster)
+
+```
+
+
+```{r Hierarchical Clustering - 3}
+## Contiguous Mapping of the Clusters
+
+## Calculate the distance between nodes
+dist_grid = unit.distances(som_grid)
+
+## Multiply the distance/dissimilarity matrix together
+dist_adj <- as.matrix(dist_codes) * dist_grid
+
+## Repeat the clustering
+clust_adj = hclust(as.dist(dist_adj), 'ward.D2')
+som_cluster_adj = cutree(clust_adj, 6)
+
+```
+
+
+```{r Hierarchical Clustering - 4}
+## Re-plot the the clusters
+
+plot(con.som, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj], 
+     main = "Clusters", 
+     pch = '.') 
+add.cluster.boundaries(con.som, som_cluster_adj)
+
+```
+
+
+### **Cluster Values**
+
+```{r Extract Aggregate Values - Con.SOM}
+## Extract a vector with the node assignments for each observation
+
+nodeByObs = con.som$unit.classif
+
+## Assign and attach the node assignments (as a factor) to the dataframe we ran the SOM with
+
+con.df.scale.v2$som.clust = as.factor(som_cluster_adj[nodeByObs])
+
+
+## Add Cluster Assignments to original dataframe 
+## Do this using merge?
+
+con.df.clus = merge(con.df, con.df.scale.v2, by = "districts")
+
+
+## Check
+head(con.df.clus)
+```
+
+
+```{r Extract Aggregate Values - Con.SOM - 2}
+## Aggregate Values
+
+cluster.vals <- aggregate(con.df.clus[ ,13:19], 
+                         by = list(con.df.clus$som.clust), mean)
+
+## Coerce into a table for a better figure
+library(data.table)
+library(kableExtra)
+
+con.clus.table = setDT(cluster.vals)
+
+con.clus.pub = con.clus.table %>% 
+  kable() %>% 
+  kable_material_dark() #%>% 
+  #scroll_box(width = "600px", height= "600px" )
+
+con.clus.pub
+
+```
+
+
+### **Conflict Trajectories**
+
+
+```{r Conflict City Trajectories - 1}
+
+## Establish the id of the city
+city_id = which(con.df.scale.v2$districts == "Quetta")
+
+## Pull out the classifications for the city
+city_nodes <- con.som$unit.classif[city_id]
+
+## Pull out the coordinates for the city
+city_crds <- som_grid$pts[city_nodes, ]
+
+
+## Plot
+
+plot(con.som, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj], 
+     main = "Clusters", pch = '', 
+     keepMargins = TRUE) 
+#add.cluster.boundaries(gap_som, som_cluster_adj)
+
+lines(city_crds, lwd=2)
+
+## Year labels
+
+years <- ifelse(con.df.scale.v2$year[city_id] %% 2 == 0, as.character(con.df.scale.v2$year[city_id]), "")
+text(jitter(city_crds), labels = years, cex = 0.75)
+
+```
+
+
+
+```{r Conflict City Trajectories - 2}
+
+
+
+```
+
+
+# **Full SOM Build**
+
+```{r Full Build SOM Grid}
+## Build the SOM grid
+## rule of thumb to initializing the grid is:
+## pick a high number (5*sqrt(n)) where n is the number of observations
+## In this case, 5*sqrt(2080) 228 nodes
+
+## Initialize a grid of  225 nodes
+som_grid_full = somgrid(xdim = 15,
+                   ydim = 15, 
+                   topo = "hexagonal")
+
+```
+
+
+```{r Full SOM - Dataframe to Matrix}
+## SOMs require a matrix object to run
+
+## Full Variables
+
+## Recreate the con.df.scale.v2 dataframe - drop the last column "som.clust" from the previous SOM
+
+con.df.scale.full = subset(con.df.scale.v2,
+                           select = -som.clust)
+
+## Check
+str(con.df.scale.full)
+## Good: som.clust removed
+
+## Convert the dataframe to a matrix
+## All rows except for the district names
+con.mat.full = as.matrix(con.df.scale.full[ ,3:28])
+
+```
+
+```{r Full SOM - Model Train}
+## Pass this to train the SOM function
+set.seed(2)
+con.som.full = som(con.mat.full, som_grid_full,
+              rlen = 1000)
+
+```
+
+
+
+```{r Full SOM - Loss Function}
+## Check to see if the algorithm has converged
+## If not you may need to run more iterations (rlen =) argument
+
+plot(con.som.full,
+     type = "changes")
+
+## Converged after 900 runs
+
+```
+
+
+```{r Full Distance Plot}
+## Plot the distance between nodes
+## Used to check for outliers
+
+plot(con.som.full, type = "dist")
+
+
+## Potential outliers? 
+
+```
+
+
+
+```{r Full Count Plot}
+## Check the number of observations per clusters
+## Used to look for empty nodes
+
+plot(con.som.full, type = "counts")
+
+
+## Perhaps a smaller grid is necessary?
+## several empty clusters
+
+```
+
+
+
+```{r Full Code Plot}
+## Plot the codebook vectors
+## These are the weights associated with each feature and can be used to interpret the organization of the SOM
+
+
+plot(con.som.full, type = "code")
+
+## Too many parameters
+
+```
+
+## **Full SOM Property Plots**
+
+```{r Full Define a Plotting Helper Function}
+## Define a helper function to plot
+
+
+prop.plot = function(x){
+  plot(con.som.full,
+     type="property",
+     property = con.som.full$codes[[1]][, x], 
+     palette.name=heat.pal, 
+     ncolors=9,
+     main = x,
+     shape = "straight")
+}
+
+```
+
+```{r Full Loop to Plot}
+## Define a loop to plot all of the variables
+## prop.plot is the helper function
+## This plot the relative weights? in the SOM?
+
+lapply(names(con.df.scale.full[,3:28]), prop.plot)
+
+```
+
+
+
+## **Full SOM Cluster Build**
+
+```{r Full Hierarchical Clustering - 1}
+## Lets start with hierarchical clustering 
+
+## First calculate the dissimilarity matrix between the values (codes) of each SOM nodes.
+dist_codes_full = dist(con.som.full$codes[[1]])
+
+
+## Use cutree and hclust to form the hierarchical clusters (start with 6)
+con_cluster_full = cutree(hclust(dist_codes_full), 6)
+
+```
+
+
+```{r Full Hierarchical Clustering - 2}
+## Visualize the SOM grid with the clusters
+
+## Color Palette
+#my.pal = brewer.pal(n = 6,
+                    #"Dark2")
+
+#my.pal = c("firebrick2", "darkorange", "dodgerblue3", "purple3", "gold1", "palegreen3")
+
+## Attempt 2 with color brewer 6 class spectral palette 
+my.pal = c("#d53e4f", "#fc8d59", "#99d594", "#3288bd", "#fee08b", "#e6f598")
+
+## Visualize
+plot(con.som.full, type="mapping", 
+     bgcol = my.pal[con_cluster_full], 
+     main = "Clusters", 
+     pch = '.') 
+add.cluster.boundaries(con.som.full, con_cluster_full)
+
+##Resembles the year
+
+```
+
+```{r Full Hierarchical Clustering - 3}
+## Contiguous Mapping of the Clusters
+
+## Calculate the distance between nodes
+dist_grid_full = unit.distances(som_grid_full)
+
+## Multiply the distance/dissimilarity matrix together
+dist_adj_full <- as.matrix(dist_codes_full) * dist_grid_full
+
+## Repeat the clustering
+clust_adj_full = hclust(as.dist(dist_adj_full), 'ward.D2')
+som_cluster_adj_full = cutree(clust_adj_full, 6)
+
+```
+
+
+```{r Full Hierarchical Clustering - 4}
+## Re-plot the the clusters
+
+plot(con.som.full, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj_full], 
+     main = "Clusters", 
+     pch = '.') 
+add.cluster.boundaries(con.som.full, som_cluster_adj_full)
+
+```
+
+```{r Full Cluster Plot with legend}
+## Define the same color palette
+#clus.pal = function(n, pal="Dark2") {
+  #brewer.pal(n, pal)
+#}
+
+## Publication figure revision
+# this code was added on 20240709 to redo the cluster figure to be more interpretable
+
+#clus.pal = function(n, pal="Accent") {
+  #brewer.pal(n, pal)
+#}
+
+#clus.pal = c("red", "orange", "blue", "purple", "yellow", "green")
+
+#clus.pal = function(n) {
+  #c("firebrick2", "darkorange", "dodgerblue3", "purple1", "gold1", "palegreen3")
+#}
+
+clus.pal = function(n) {
+  c("#d53e4f", "#fc8d59", "#99d594", "#3288bd", "#fee08b", "#e6f598")
+}
+
+## Plot the clusters Values
+
+plot(con.som.full, 
+     type="property", 
+     property = som_cluster_adj_full,
+     palette.name = clus.pal, 
+     main = "Clusters",
+     shape = "straight") 
+add.cluster.boundaries(con.som.full, som_cluster_adj_full)
+
+```
+
+
+### **Full Cluster Values**
+
+```{r Full Extract Aggregate Values - con.som.full}
+## Extract a vector with the node assignments for each observation
+
+nodeByObs.full = con.som.full$unit.classif
+
+## Assign and attach the node assignments (as a factor) to the dataframe we ran the SOM with
+
+con.df.scale.full$som.clust = as.factor(som_cluster_adj_full[nodeByObs.full])
+
+
+## Add Cluster Assignments to original dataframe 
+## Do this using merge?
+
+con.df.clus.full = merge(con.df, con.df.scale.full, by = c("districts", "year"))
+
+
+## Check
+head(con.df.clus.full)
+dim(con.df.clus.full)
+```
+
+
+```{r Extract Aggregate Values - Con.som.full - 2}
+## Aggregate Values
+
+cluster.vals.full <- aggregate(con.df.clus.full[ ,5:29], 
+                         by = list(con.df.clus.full$som.clust), mean)
+
+## Coerce into a table for a better figure
+library(data.table)
+library(kableExtra)
+
+con.clus.table.full = setDT(cluster.vals.full)
+
+con.clus.table.full.v2 = con.clus.table.full[,-c("protests.x", "battles.x", "expl.x", "riots.x", "vac.x", "sd.x")]
+
+names(con.clus.table.full.v2)[names(con.clus.table.full.v2) == "Group.1"] = "Cluster"
+
+con.clus.pub.full = con.clus.table.full.v2 %>% 
+  kable() %>% 
+  kable_paper() #%>% 
+  #scroll_box(width = "600px", height= "600px" )
+
+con.clus.pub.full
+
+```
+
+
+### **Full City Trajectories**
+
+
+```{r Full City Trajectories - East Karchi}
+
+## Establish the id of the city
+city_id = which(con.df.scale.full$districts == "East Karachi")
+
+## Pull out the classifications for the city
+city_nodes <- con.som.full$unit.classif[city_id]
+
+## Pull out the coordinates for the city
+city_crds <- som_grid_full$pts[city_nodes, ]
+
+
+## Plot
+
+plot(con.som.full, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj_full], 
+     main = "Clusters", pch = '', 
+     keepMargins = TRUE,
+     shape = "straight") 
+#add.cluster.boundaries(gap_som, som_cluster_adj)
+
+lines(city_crds, lwd=2)
+
+## Year labels
+
+years <- ifelse(con.df.scale.full$year[city_id] %% 2 == 0, as.character(con.df.scale.full$year[city_id]), "")
+text(jitter(city_crds), labels = years, cex = 0.75)
+
+```
+
+
+```{r Full City Trajectories - Lahore}
+
+## Establish the id of the city
+city_id = which(con.df.scale.full$districts == "Lahore")
+
+## Pull out the classifications for the city
+city_nodes <- con.som.full$unit.classif[city_id]
+
+## Pull out the coordinates for the city
+city_crds <- som_grid_full$pts[city_nodes, ]
+
+
+## Plot
+
+plot(con.som.full, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj_full], 
+     main = "Clusters", pch = '', 
+     keepMargins = TRUE,
+     shape = "straight") 
+#add.cluster.boundaries(gap_som, som_cluster_adj)
+
+lines(city_crds, lwd=2)
+
+## Year labels
+
+years <- ifelse(con.df.scale.full$year[city_id] %% 2 == 0, as.character(con.df.scale.full$year[city_id]), "")
+text(jitter(city_crds), labels = years, cex = 0.75)
+
+```
+
+
+```{r Full City Trajectories - Peshawar}
+
+## Establish the id of the city
+city_id = which(con.df.scale.full$districts == "Peshawar")
+
+## Pull out the classifications for the city
+city_nodes <- con.som.full$unit.classif[city_id]
+
+## Pull out the coordinates for the city
+city_crds <- som_grid_full$pts[city_nodes, ]
+
+
+## Plot
+
+plot(con.som.full, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj_full], 
+     main = "Clusters", pch = '', 
+     keepMargins = TRUE,
+     shape = "straight") 
+#add.cluster.boundaries(gap_som, som_cluster_adj)
+
+lines(city_crds, lwd=2)
+
+## Year labels
+
+years <- ifelse(con.df.scale.full$year[city_id] %% 1 == 0, as.character(con.df.scale.full$year[city_id]), "")
+text(jitter(city_crds), labels = years, cex = 0.75)
+
+```
+
+```{r Full City Trajectories - Quetta}
+
+## Establish the id of the city
+city_id = which(con.df.scale.full$districts == "Quetta")
+
+## Pull out the classifications for the city
+city_nodes <- con.som.full$unit.classif[city_id]
+
+## Pull out the coordinates for the city
+city_crds <- som_grid_full$pts[city_nodes, ]
+
+
+## Plot
+
+plot(con.som.full, 
+     type="mapping", 
+     bgcol = my.pal[som_cluster_adj_full], 
+     main = "Clusters", pch = '', 
+     keepMargins = TRUE,
+     shape = "straight") 
+#add.cluster.boundaries(gap_som, som_cluster_adj)
+
+lines(city_crds, lwd=2)
+
+## Year labels
+
+years <- ifelse(con.df.scale.full$year[city_id] %% 2 == 0, as.character(con.df.scale.full$year[city_id]), "")
+text(jitter(city_crds), labels = years, cex = 0.75)
+
+```
+
+
+# **Data Exploration**
+
+## **Data Read**
+
+```{r Read spatial conflict dataframe in}
+## Read in the spatial conflict dataframe
+con.df.sf = st_read("../data/conflict/complete_data_20230411.shp")
+
+## Check
+head(con.df.sf)
+
+```
+
+
+```{r Add Ratios to sf data}
+## Add Ratios
+## Why the change to _ instead of total"."con? Shapefile nuance?
+
+con.df.sf = con.df.sf %>% 
+  mutate(total_con_percapita = total_con/pop) %>% 
+  mutate(protests_percapita = protests/pop) %>% 
+  mutate(battles_percapita = battles/pop) %>% 
+  mutate(expl_percapita = expl/pop) %>% 
+  mutate(riots_percapita = protests/pop) %>% 
+  mutate(vac_percapita = vac/pop) %>% 
+  mutate(sd_percapita = sd/pop) 
+
+
+## Check
+head(con.df.sf)
+
+```
+
+```{r Merge SOM to con.df.sf}
+## Merge the clusters to the shape file
+con.df.sf$som.clust = con.df.scale.full$som.clust
+
+```
+
+
+```{r SOM Cluster Map}
+## Visualize the som clusters
+
+tm_shape(con.df.sf) +
+  tm_borders() +
+  tm_facets(by = "year") +
+  tm_fill("som.clust",
+          palette = my.pal,
+          title = "Cluster")
+```
+
+
+## **Visualizations**
+
+```{r Initial Shapefile Check}
+## Visualize the geometry
+tm_shape(con.df.sf) + 
+  tm_borders()
+
+
+## Good
+```
+
+
+```{r Population Map}
+## Check some of the variables
+## Reminder - yearly data
+quick.pal = brewer.pal(n = 9,
+                       "RdPu")
+
+tm_shape(con.df.sf) +
+  tm_borders() +
+  tm_facets(by = "year") +
+  tm_fill("pop",
+          palette = quick.pal)
+
+```
+
+```{r Total Conflict Map}
+## Check some of the variables
+quick.pal = brewer.pal(n = 9,
+                       "YlOrRd")
+
+tm_shape(con.df.sf) +
+  tm_borders() +
+  tm_facets(by = "year") +
+  tm_fill("total_con",
+          palette = quick.pal)
+
+```
+
+
+
+```{r SPEI Map}
+## Check some of the variables
+quick.pal = brewer.pal(n = 11,
+                       "RdYlBu")
+
+tm_shape(con.df.sf) +
+  tm_borders() +
+  tm_facets(by = "year") +
+  tm_fill("spei",
+          palette = quick.pal)
+
+```
+
+
+```{r Total Conflict Ratio Map}
+## Check some of the variables
+quick.pal = brewer.pal(n = 9,
+                       "YlOrRd")
+
+tm_shape(con.df.sf) +
+  tm_borders() +
+  tm_facets(by = "year") +
+  tm_fill("total_con_percapita",
+          palette = quick.pal)
+
+```
+
+# **Linear Model Build**
+
+## **Intro**
+
+```{r Simple LM - Total Con by Year}
+## Plot
+plot(total_con ~ year,
+     data = con.df.sf)
+
+```
+
+
+```{r Simple LM - Total Con Ratio by Year}
+## Plot
+plot(total_con_percapita ~ year,
+     data = con.df.sf)
+
+```
+
+```{r Correlation Plot}
+## Visualize the Correlation between features
+##con.df.sf.sub = subset(con.df.sf, select = -c(districts, longitude, latitude, geometry))
+
+##Use the orignal dataframe
+con.df.sub = subset(con.df, select = -c(districts, longitude, latitude))
+
+ggcorrplot(cor(con.df.sub), 
+           method = "square",
+           type = "lower",
+           lab = TRUE,
+           colors = c("blue", "darksalmon", "firebrick"))
+           #p.mat = cor_pmat(pak.model.df)) #x out non-significant p-values
+
+
+```
+
+```{r Conflict Histogram}
+## Is y normal? 
+## y - conflict (both count and ratio)
+
+hist(con.df$total.con)
+
+## Left skewed
+## Log transform fixes this, although a glm may be a better/more flexible approach
+
+```
+
+
+```{r Other Variable Histogram}
+
+## histograms for all variables
+
+hist(log(con.df$total.con.percapita))
+
+```
+
+```{r Transform Ys}
+## Transform y's
+#con.df$log.total.con = log(con.df$total.con)
+
+## percapita total con
+#con.df$log.total.con.percapita = log(con.df$total.con.percapita)
+
+```
+
+
+
+```{r Set Districts as Factor}
+
+## Set districts as a factor
+con.df$districts = factor(con.df$districts)
+
+```
+
+
+```{r Visualize the Difference}
+
+```
+
+
+## **Intercept Model**
+
+```{r Initial  Build - 1}
+## Intercept model
+
+fit0 = glm(total.con ~ 1,
+           family = poisson(link = "log"),
+           data = con.df)
+
+## Check
+summary(fit0)
+
+```
+
+
+```{r Initial LM Mixed Effects Build - 2}
+## Transform coefficients
+exp(coef(fit0))
+
+```
+
+Note: The average number of conflicts per district by year is approximately **`r exp(coef(fit0))`**
+
+## **City GLM**
+
+```{r GLM Mixed Effects Model - City Extraction}
+## Visual Check of the mean total conflicts by district
+## Need to subset
+city.names = c("East Karachi", "Lahore", "Peshawar", "Quetta")
+
+city.con.df = con.df %>% 
+  filter(districts %in% city.names)
+
+## Check
+str(city.con.df)
+
+```
+
+### **City Visualizations**
+
+```{r Plot City Mean Values}
+
+pplot = ggplot(data = city.con.df, aes(x = districts, y = total.con)) +
+                        geom_point(aes(color = districts)) +
+                        labs(title = "Total Conflict") +
+                        xlab("Location") +
+                        ylab("Number of Conflicts") +
+                        facet_wrap(facets = "year")
+
+pplot
+```
+
+```{r Plot City Mean Conflict Boxplot}
+
+bplot = ggplot(data = city.con.df, aes(x = districts, y = total.con)) +
+                        geom_boxplot(aes(fill = districts))+
+                        labs(title = "Annual Total Conflict Events (2010 - 2022)") +
+                        xlab("Location") +
+                        ylab("Number of Conflicts") +
+                        labs(fill = "District")
+
+bplot
+```
+
+
+```{r Plot City Mean Conflict Boxplot 2}
+
+bplot.percapita = ggplot(data = city.con.df, aes(x = districts, y = total.con.percapita)) +
+                        geom_boxplot(aes(fill = districts))+
+                        labs(title = "Annual Total Conflict Per Capita (2010 - 2022)") +
+                        xlab("Location") +
+                        ylab("Total Conflict per capita") +
+                        labs(fill = "District")
+
+bplot.percapita
+```
+
+
+
+```{r Plot City Mean Population}
+
+bplot = ggplot(data = city.con.df, aes(x = districts, y = pop/1000000)) +
+                        geom_boxplot(aes(fill = districts))+
+                        labs(title = "Population") +
+                        xlab("Location") +
+                        ylab("Population (millions)")
+
+bplot
+```
+
+
+```{r City Event Types}
+## Split the events into violent/non-violent
+city.con.df$violent.events = city.con.df$battles + city.con.df$expl + city.con.df$riots + city.con.df$vac
+
+city.con.df$nonviolent.events = city.con.df$protests + city.con.df$sd
+
+## Check
+str(city.con.df)
+```
+
+```{r Visualize Violent vs Non-violent events}
+## Visualize
+bplot.viol = ggplot(data = city.con.df, aes(x = districts, y = violent.events)) +
+                        geom_boxplot(aes(fill = districts))+
+                        labs(title = "Violent Events") +
+                        xlab("Location") +
+                        ylab("Number of Events") +
+                        labs(fill = "Districts")
+
+## Non-violent events
+bplot.nonviol = ggplot(data = city.con.df, aes(x = districts, y = nonviolent.events)) +
+                        geom_boxplot(aes(fill = districts))+
+                        labs(title = "Non-violent Events") +
+                        xlab("Location") +
+                        ylab("Number of Events") +
+                        labs(fill = "Districts")
+
+
+ggarrange(bplot.viol, bplot.nonviol,
+         ncol = 2,
+         nrow = 1,
+         common.legend = TRUE,
+         legend = "right")
+```
+
+```{r Quick ANOVA - Violent Events}
+## Violent Events
+
+vio.aov = aov(violent.events ~ districts,
+              data = city.con.df)
+
+summary(vio.aov)
+
+```
+
+
+```{r Quick ANOVA - Non-Violent Events}
+## Violent Events
+
+nonvio.aov = aov(nonviolent.events ~ districts,
+              data = city.con.df)
+
+summary(nonvio.aov)
+
+```
+
+
+```{r Generate Clean ANOVA Tables, message = FALSE}
+library(xtable)
+
+## Neat ANOVA tables
+v.anova.table = xtable(vio.aov)
+nv.anova.table = xtable(nonvio.aov)
+
+
+## kableextra
+kable(v.anova.table, caption = "Violent Events ANOVA") %>% 
+  kable_classic()
+
+kable(nv.anova.table, caption = "Non-Violent Events ANOVA") %>% 
+  kable_classic()
+```
+
+
+
+```{r City Temporal Conflict}
+## Stacked record of conflict by city
+
+city.time.plot = ggplot(data = city.con.df, aes(x = year, y = total.con, col = districts)) +
+  geom_line() +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  xlab("Year") +
+  ylab("Total Number of Conflicts") +
+  labs(col = "Districts") +
+  scale_x_continuous(breaks = c(seq(from = 2010, to = 2022, by = 1))) +
+  facet_wrap(~districts, scales = "free")
+
+
+city.time.plot
+  
+
+
+```
+
+
+```{r SPEI Record}
+## Stacked record of conflict by city
+
+spei.time.plot = ggplot(data = con.df, aes(x = year, y = spei)) +
+  geom_line() +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  xlab("Year") +
+  ylab("SPEI") +
+  scale_x_continuous(breaks = c(seq(from = 2010, to = 2022, by = 1)))
+
+
+spei.time.plot
+  
+
+```
+
+
+
+```{r City Urbanization and Income }
+## Visualize the trend
+
+bplot.dep = ggplot(data = city.con.df, aes(x = districts, y = dep.index)) +
+                        geom_point(aes(col = districts))+
+                        labs(title = "Deprivation Index") +
+                        xlab("Location") +
+                        ylab("Deprivation Index") +
+                        labs(col = "Districts")
+
+## Non-violent events
+bplot.built = ggplot(data = city.con.df, aes(x = districts, y = built)) +
+                        geom_point(aes(col = districts))+
+                        labs(title = "Built") +
+                        xlab("Location") +
+                        ylab("Built") +
+                        labs(col = "Districts")
+
+
+ggarrange(bplot.dep, bplot.built,
+         ncol = 2,
+         nrow = 1,
+         common.legend = TRUE,
+         legend = "right")
+
+```
+
+
+### **GLMs**
+
+```{r GLM}
+## Use the original data con.df
+##Convert district to factor
+con.df$districts = factor(con.df$districts)
+
+## Poisson Distribution
+tc.glm.1 = glmer(total.con ~ 1 + (1|districts),
+                 family = poisson,
+                 data = con.df)
+
+summary(tc.glm.1)
+
+
+## Population becomes an offset - conflict will scale with population
+## Climate variables highly correlated
+#offset(log(pop)) + spei + dep.index + built + temp.jul + precip.apr + (1|districts),
+```
+
+
+```{r Full GLM}
+## Full model
+##Covert year to numeric
+con.df$year = as.numeric(con.df$year)
+
+## Poisson Distribution
+tc.glm.2 = glmer(total.con ~ offset(log(pop)) + year + spei + dep.index + built + temp.jul + precip.apr + (1|districts),
+                 family = poisson,
+                 data = con.df)
+
+summary(tc.glm.2)
+
+
+## Population becomes an offset - conflict will scale with population
+## Climate variables highly correlated
+#
+
+```
+
+
+```{r Full GLM Run 2}
+## Scale the covariates 
+new.df = con.df.scale.v2
+
+#Add the total.con unscaled
+new.df$total.con = con.df$total.con
+
+## Check
+str(new.df)
+
+## Convert district to factor and year to numeric
+new.df$districts = factor(new.df$districts)
+new.df$year = as.numeric(new.df$year)
+
+## Re run model
+tc.glm.3 = glmer(total.con ~ dep.index + offset(pop) + spei + built + temp.jul + precip.apr + temp.jan + precip.jul + precip.oct + temp.oct + temp.apr + (1|districts),
+                 family = poisson,
+                 data = new.df)
+
+summary(tc.glm.3)
+
+## offset(log(pop)) + + spei + dep.index + built + temp.jul + precip.apr
+## 1st Run - model failed to converge
+## year and precip.jan are the issues
+
+```
+
+
+```{r Coefficient Interpretation}
+## Reminder that this are transformed and scaled
+exp(fixef(tc.glm.3))
+
+
+## Need help on interpretation!!
+##These are scaled and transformed
+```
+
+
+
+```{r GLM Intercept Model - NewDF}
+## Re run the intercept model for comparison
+
+tc.glm.0.new = glmer(total.con ~ 1 + (1|districts),
+                 family = poisson,
+                 data = new.df)
+
+summary(tc.glm.0.new)
+```
+
+
+```{r Model Comparisons}
+## Compare the two glms
+anova(tc.glm.3, tc.glm.0.new)
+
+```
+
+```{r}
+#library(moments) ##Skewness
+
+#var.names2 = var.names
+#log.trans = function(x){
+  #log(x + 1)
+#}
+
+#con.df.x = con.df %>% 
+  #mutate_at(var.names, log.trans)
+
+## Re run model
+#tc.glm.x = glmer(total.con ~ 1 + dep.index + offset(pop) + spei + built + temp.jul + precip.apr + temp.jan + precip.jul + precip.oct + temp.oct + temp.apr + (1|districts),
+                 #family = poisson,
+                 #ata = con.df)
+
+#summary(tc.glm.x)
+
+# dep.index + offset(pop) + spei + built + temp.jul + precip.apr + temp.jan + precip.jul + precip.oct + temp.oct + temp.apr +
+```
+
+
+
+# **Spatial Model Build**
+
+```{r Check Spatial Dataframe}
+## Check 
+class(con.df.sf)
+
+## Variables
+str(con.df.sf)
+
+```
+
+
+```{r Spatial Weight Matrix}
+## Need to extract one years worth of data
+## 2012 to start
+con.df.sf.2012 = con.df.sf %>% 
+  filter(year %in% "2012")
+
+## Extract Centroids
+pak.coords = st_centroid(st_geometry(con.df.sf.2012))
+
+## Check
+plot(st_geometry(con.df.sf.2012),
+     reset = FALSE)
+plot(pak.coords, pch = 16, col = 2, add =TRUE)
+```
+
+
+```{r Neighborhood Function, message=FALSE}
+library(spdep)
+library(spatialreg)
+
+## Build neighborhood structure
+pak1_nb = poly2nb(st_geometry(con.df.sf.2012))
+
+## Check
+plot(st_geometry(con.df.sf.2012),
+     reset = FALSE)
+plot(pak1_nb, pak.coords, lwd = 1.5, col = 2, add =TRUE)
+```
+
+
+```{r Spatial Weights}
+## Generate the spatial weights
+## Row standardization
+
+pak1_lw_w = nb2listw(pak1_nb, style = "W")
+
+
+```
+
+
+```{r Check for Autocorrelation}
+## Check for skew in the con.df.sf outcome variable
+hist(log(con.df.sf.2012$total_con + 1))
+
+## Create a log + 1 transformed variable
+con.df.sf.2012$log.total.con = log(con.df.sf.2012$total_con + 1)
+
+```
+
+
+```{r Plot log total.con}
+## Visualize 
+#plot(con.df.sf["log.total.con"])
+
+## Visually there appears to be autocorrelation
+```
+
+
+
+
+
+# **Random Forest Build**
+
+## **Initial Model**
+
+```{r Total Con RF Build - Task}
+## Load ranger package
+library(ranger)
+library(mlr3verse)
+library(mlr3tuning)
+
+## Transform total.con to log
+con.df$log.total.con = ihs(con.df$total.con)
+
+## Define the task
+task_totalcon = TaskRegr$new(id = "total_con",
+                             backend = con.df,
+                             target = "log.total.con")
+
+## Task details
+task_totalcon$col_roles
+
+```
+
+
+```{r Total Con RF Build - Task - Feature Select}
+## Exclude Features
+## lat, long, and percapitas
+## Exclude conflict
+task_totalcon$col_roles$feature = setdiff(task_totalcon$col_roles$feature,
+                                          c("latitude", "longitude", "total.con.percapita", "battles.percapita", "protests.percapita", "riots.percapita", "vac.percapita", "sd.percapita", "expl.percapita", "total.con", "protests", "battles", "riots", "vac", "sd", "expl"))
+
+
+## Check
+task_totalcon$col_roles
+
+```
+
+
+
+```{r Total Con RF Build - Performance Measure}
+## Define the performance measure
+## Reminder - Regression task 
+
+measure = msr("regr.rmse")
+
+```
+
+
+```{r Total Con RF Build - Learner}
+## Define the learner
+lrn_rf = lrn("regr.ranger",
+             predict_type = "response",
+             importance = "permutation" )
+
+```
+
+
+```{r Total Con RF Build - Resampling Method}
+## Define the resampling method
+## 1st Run - Simple holdout 0.8
+resamp_hout = rsmp("holdout",
+                   ratio = 0.8)
+
+
+## Instantiate the resampling method
+resamp_hout$instantiate(task_totalcon)
+
+```
+
+
+```{r Total Con RF Build - Run the RF}
+## Run the resampler/model
+##tc = total conflict
+
+tc_rf = resample(task = task_totalcon,
+                 learner = lrn_rf,
+                 resampling = resamp_hout,
+                 store_models = TRUE)
+
+```
+
+
+```{r Total Con RF Build - Check Performance Measures}
+## Check the performace measures
+tc_rf$score(measure)
+
+```
+
+```{r Total Con RF Build - Visualize the Model}
+## Initial visualization of the model
+## Rpart for visualization
+library(rpart)
+library(rpart.plot)
+
+## Visualize
+## Can't run it with a random forest
+## Needs to be a CART
+#prp(tc_rf$learners[[1]]$model,
+    #extra = 106,
+    #roundint = FALSE)
+
+```
+
+
+## **Tuning the Model**
+
+```{r Total Con RF Build - Tuning - Param Set}
+## Check the Parameters 
+lrn_rf$param_set
+
+```
+
+
+```{r Total Con RF Build - Tuning}
+## Tune the number of variables per split (mtry)
+## Tune the number of trees built (numtrees)
+
+tune_ps = ParamSet$new(list(
+  ParamInt$new("mtry", lower = 1, upper = 8),
+  ParamInt$new("num.trees", lower = 100, upper = 1000)
+))
+
+```
+
+
+```{r Total Con RF Build - Eval Stopping Condition}
+## Limit the number of iterations/evaluations to 50
+evals = trm("evals",
+            n_evals = 50)
+```
+
+
+```{r Total Con RF Build - Tuner Setup}
+## Define the tuner to grid search with 10 steps between the lower and upper bounds
+tuner = tnr("grid_search",
+            resolution = 10)
+```
+
+
+
+```{r Total Con RF Build - Set up Autotuner}
+## Set up the nested resampling for tuning
+## Build the resample for the inner
+resampling_inner = rsmp("holdout",
+                        ratio = 0.8)
+
+## Build the resample for the outer (in this case 3-fold)
+resampling_outer = rsmp("cv", 
+                        folds = 3)
+
+
+## Set up the autotuner
+
+at_rf = AutoTuner$new(learner = lrn_rf,
+                      resampling = resampling_inner,
+                      measure = measure,
+                      search_space = tune_ps,
+                      terminator = evals,
+                      tuner = tuner)
+
+```
+
+
+```{r Total Con RF Build - Re run Resampler}
+## Tuning the paramaters using the parameter set/solution
+
+tc_rf.2 = resample(task = task_totalcon,
+                 learner = at_rf,
+                 resampling = resampling_outer,
+                 store_models = TRUE)
+
+```
+
+
+```{r Total Con RF Build - Tuning Performance}
+## Check the performance measure for each of the three model runs
+tc_rf.2$score(measure)
+
+## Check the aggregate performance measure
+tc_rf.2$aggregate(measure)
+
+```
+
+
+```{r Variable Importance Plot - Mod 1} 
+## Check the variable importance for the first model
+library(vip)
+vip(object = tc_rf.2$learners[[1]]$model$learner$model)
+
+```
+
+
+```{r Variable Importance Plot} 
+## Check the variable importance for the second model
+library(vip)
+vip(object = tc_rf.2$learners[[2]]$model$learner$model)
+
+```
+
+```{r Partial Dependency Plots Population, message=FALSE}
+## Look at the partial dependency plots for the top 5 variables for this Random Forest.
+library(pdp) ##partial dependency plot package
+
+## Population plot
+partial(tc_rf.2$learners[[1]]$model$learner$model, pred.var = "pop", prob = TRUE,
+        train = con.df, plot = TRUE)
+
+
+```
+
+
+```{r Partial Dependency Plots Jan Temp, message=FALSE}
+## Look at the partial dependency plots for the top 5 variables for this Random Forest.
+library(pdp) ##partial dependency plot package
+
+## Population plot
+partial(tc_rf.2$learners[[1]]$model$learner$model, pred.var = "temp.jan", prob = TRUE,
+        train = con.df, plot = TRUE)
+
+
+```
+
+
+```{r Partial Dependency Plots dep index, message=FALSE}
+## Look at the partial dependency plots for the top 5 variables for this Random Forest.
+library(pdp) ##partial dependency plot package
+
+## Population plot
+partial(tc_rf.2$learners[[1]]$model$learner$model, pred.var = "dep.index", prob = TRUE,
+        train = con.df, plot = TRUE)
+
+
+```
+
+
+```{r Partial Dependency Plots built, message=FALSE}
+## Look at the partial dependency plots for the top 5 variables for this Random Forest.
+library(pdp) ##partial dependency plot package
+
+## Population plot
+partial(tc_rf.2$learners[[1]]$model$learner$model, pred.var = "built", prob = TRUE,
+        train = con.df, plot = TRUE)
+
+
+```
+
+
+```{r Partial Dependency Plots apr temp, message=FALSE}
+## Look at the partial dependency plots for the top 5 variables for this Random Forest.
+library(pdp) ##partial dependency plot package
+
+## Population plot
+partial(tc_rf.2$learners[[1]]$model$learner$model, pred.var = "temp.apr", prob = TRUE,
+        train = con.df, plot = TRUE)
+
+
+```
+
+
+
+
+
+
+
+
+
+
