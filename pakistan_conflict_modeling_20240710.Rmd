@@ -1181,12 +1181,26 @@ con.df.sf$som.clust = con.df.scale.full$som.clust
 ```{r SOM Cluster Map}
 ## Visualize the som clusters
 
-tm_shape(con.df.sf) +
+cluster.map = tm_shape(con.df.sf) +
   tm_borders() +
   tm_facets(by = "year") +
   tm_fill("som.clust",
           palette = my.pal,
           title = "Cluster")
+
+cluster.map
+```
+
+
+```{r Cluster map save as pdf}
+## save as a pdf
+
+pdf(file = "/Users/davidleydet/Desktop/University of Utah PhD /Journal Article Submission/Pakistan Paper 2023/Figures/cluster_map_v3.pdf" )
+
+cluster.map
+
+dev.off()
+
 ```
 
 
@@ -1946,6 +1960,15 @@ tc_rf.2$score(measure)
 ## Check the aggregate performance measure
 tc_rf.2$aggregate(measure)
 
+rmse = tc_rf.2$aggregate(measure)
+
+## RMSE 
+#country.nonimp.rmse = sqrt(mean(country.nonimp.rf$mse))
+
+## percentage error
+
+rmse / diff(range(con.df$total.con))
+
 ```
 
 
@@ -2022,6 +2045,7 @@ partial(tc_rf.2$learners[[1]]$model$learner$model, pred.var = "temp.apr", prob =
 
 
 ```
+
 
 
 
