@@ -1,0 +1,407 @@
+---
+title: "HMA ICE Plot"
+author: "David Leydet"
+date: "2024-09-17"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+# **Introduction**
+
+This document contains code to build grouped/colored ICE plots for our High Mountain Asia conflict research. This code is adopted from the Palmer Penguins example code located in ice_example_annotated_DL_20240917.R file located [here](https://github.com/leydetd/data_analysis_code). 
+
+
+
+```{r Set WD}
+
+setwd("../r_code/")
+
+library(tidyverse)
+library(randomForest)
+library(iml)
+
+```
+
+
+
+```{r}
+## Read in data
+
+# load cleaned data
+adm.imp = read.csv("../cleaned_data/hma_adm1_imp_df_clean_20240418.csv")
+
+
+# remove row number variable (X) from df
+adm.imp = adm.imp %>% 
+  select(-X)
+
+# factor country and adm 1
+adm.imp$country = as.factor(adm.imp$country)
+adm.imp$adm1 = as.factor(adm.imp$adm1)
+#adm.imp$precip = as.integer(adm.imp$precip)
+
+# check
+str(adm.imp)
+
+
+```
+
+
+```{r}
+# First attempt - remove country, adm1, and year for the training dataset
+
+adm.imp.train = adm.imp %>% 
+  select(pop, precip, temp, nlights, ge, cpt, rol, rq, polstab, voice, con)
+
+# Check
+str(adm.imp.train)
+
+```
+
+# **Random Forest Setup**
+
+```{r}
+# Build random forest
+
+rf = randomForest(con ~ ., adm.imp.train)
+
+# View
+rf
+
+```
+
+
+```{r}
+# Create a dataframe without the target
+
+X = adm.imp.train[which(names(adm.imp.train) != "con")]
+
+```
+
+```{r}
+
+# Create a new predictor object
+# Store the data (X) and target (con) in the predictor container along with the randomForest parameters
+# Leave type = prob out. It throws an error when building the pdp. I did not set this when running the other iml models
+predictor <- Predictor$new(rf, data = X,
+                           y = adm.imp.train$con)
+                           #type = "prob")
+
+```
+
+
+# **Political Stability Plots**
+
+```{r}
+# PDP object
+pdp <- FeatureEffect$new(predictor, 
+                         feature="polstab", center.at=min(X$polstab), 
+                         method="pdp")
+
+# ICE object
+ice <- FeatureEffect$new(predictor, 
+                         feature="polstab", center.at=min(X$polstab), 
+                         method="ice")
+
+```
+
+
+
+```{r}
+# View the original ice plot
+ice$plot()
+
+```
+
+
+```{r}
+
+## This contains all the individual plots
+## **This is a key step**
+pdp_res <- pdp$results
+ice_res <- ice$results
+
+```
+
+
+
+```{r}
+
+## Get Country from original (filtered) data and put it in the new ice_res dataframe
+## How does this connect to the .id numbers?
+
+ice_res$country <- adm.imp$country[ice_res$.id]
+
+#ice_res$sex <- penguins$sex[ice_res$.id]
+
+```
+
+
+```{r}
+# Ice plot in ggplot
+
+ggplot(ice_res, aes(x = polstab, y = .value, group = .id, col = country)) +
+  geom_line() +
+  facet_wrap(~country, scales = "free_y") +
+  xlab("Political Stability") +
+  ylab("Conflict")
+```
+
+```{r}
+# Combined PDP and Ice Plot
+
+pol.plot = ggplot(ice_res, aes(x = polstab, y = .value)) +
+  geom_line(aes(group = .id, col = country), alpha = 0.5) +
+  #facet_wrap(~.class) +
+  geom_line(data = pdp_res, size = 2) +
+  xlab("Political Stability") +
+  ylab("Conflict")
+
+pol.plot
+
+
+```
+
+
+
+# **Population Plots**
+
+```{r}
+# PDP object
+pdp.pop <- FeatureEffect$new(predictor, 
+                         feature="pop", center.at=min(X$pop), 
+                         method="pdp")
+
+# ICE object
+ice.pop <- FeatureEffect$new(predictor, 
+                         feature="pop", center.at=min(X$pop), 
+                         method="ice")
+
+```
+
+
+
+```{r}
+# View the original ice plot
+ice.pop$plot()
+
+```
+
+
+```{r}
+
+## This contains all the individual plots
+## **This is a key step**
+pdp.pop_res <- pdp.pop$results
+ice.pop_res <- ice.pop$results
+
+```
+
+
+
+```{r}
+
+## Get Country from original (filtered) data and put it in the new ice_res dataframe
+## How does this connect to the .id numbers?
+
+ice.pop_res$country <- adm.imp$country[ice.pop_res$.id]
+
+#ice_res$sex <- penguins$sex[ice_res$.id]
+
+```
+
+
+```{r}
+# Ice plot in ggplot
+
+ggplot(ice.pop_res, aes(x = pop, y = .value, group = .id, col = country)) +
+  geom_line() +
+  facet_wrap(~country, scales = "free_y") +
+  xlab("Population") +
+  ylab("Conflict")
+```
+
+```{r}
+# Combined PDP and Ice Plot
+
+pop.plot = ggplot(ice.pop_res, aes(x = pop, y = .value)) +
+  geom_line(aes(group = .id, col = country), alpha = 0.5) +
+  #facet_wrap(~.class) +
+  geom_line(data = pdp.pop_res, size = 2) +
+  xlab("Population") +
+  ylab("Conflict")
+
+pop.plot
+```
+
+
+
+
+# **Temperature Plots**
+
+```{r}
+# PDP object
+pdp.temp <- FeatureEffect$new(predictor, 
+                         feature="temp", center.at=min(X$temp), 
+                         method="pdp")
+
+# ICE object
+ice.temp <- FeatureEffect$new(predictor, 
+                         feature="temp", center.at=min(X$temp), 
+                         method="ice")
+
+```
+
+
+
+```{r}
+# View the original ice plot
+ice.temp$plot()
+
+```
+
+
+```{r}
+
+## This contains all the individual plots
+## **This is a key step**
+pdp.temp_res <- pdp.temp$results
+ice.temp_res <- ice.temp$results
+
+```
+
+
+
+```{r}
+
+## Get Country from original (filtered) data and put it in the new ice_res dataframe
+## How does this connect to the .id numbers?
+
+ice.temp_res$country <- adm.imp$country[ice.temp_res$.id]
+
+#ice_res$sex <- penguins$sex[ice_res$.id]
+
+```
+
+
+```{r}
+# Ice plot in ggplot
+
+ggplot(ice.temp_res, aes(x = temp, y = .value, group = .id, col = country)) +
+  geom_line() +
+  facet_wrap(~country, scales = "free_y") +
+  xlab("Temperature") +
+  ylab("Conflict")
+```
+
+```{r}
+# Combined PDP and Ice Plot
+
+temp.plot = ggplot(ice.temp_res, aes(x = temp, y = .value)) +
+  geom_line(aes(group = .id, col = country), alpha = 0.5) +
+  #facet_wrap(~.class) +
+  geom_line(data = pdp.temp_res, size = 2) +
+  xlab("Temperature") +
+  ylab("Conflict")
+
+temp.plot
+
+
+```
+
+
+
+
+
+# **Precipitation Plots**
+
+```{r}
+# PDP object
+pdp.precip <- FeatureEffect$new(predictor, 
+                         feature="precip", center.at=min(X$precip), 
+                         method="pdp")
+
+# ICE object
+ice.precip <- FeatureEffect$new(predictor, 
+                         feature="precip", center.at=min(X$precip), 
+                         method="ice")
+
+```
+
+
+
+```{r}
+# View the original ice plot
+ice.precip$plot()
+
+```
+
+
+```{r}
+
+## This contains all the individual plots
+## **This is a key step**
+pdp.precip_res <- pdp.precip$results
+ice.precip_res <- ice.precip$results
+
+```
+
+
+
+```{r}
+
+## Get Country from original (filtered) data and put it in the new ice_res dataframe
+## How does this connect to the .id numbers?
+
+ice.precip_res$country <- adm.imp$country[ice.precip_res$.id]
+
+#ice_res$sex <- penguins$sex[ice_res$.id]
+
+```
+
+
+```{r}
+# Ice plot in ggplot
+
+ggplot(ice.precip_res, aes(x = precip, y = .value, group = .id, col = country)) +
+  geom_line() +
+  facet_wrap(~country, scales = "free_y") +
+  xlab("Precipitation") +
+  ylab("Conflict")
+```
+
+```{r}
+# Combined PDP and Ice Plot
+
+precip.plot = ggplot(ice.precip_res, aes(x = precip, y = .value)) +
+  geom_line(aes(group = .id, col = country), alpha = 0.5) +
+  #facet_wrap(~.class) +
+  geom_line(data = pdp.precip_res, size = 2) +
+  xlab("Precipitation") +
+  ylab("Conflict")
+
+precip.plot
+
+```
+
+
+```{r Arrange Plots}
+library(ggpubr)
+
+comb.plot = ggarrange(pop.plot, temp.plot, pol.plot, precip.plot, nrow = 2, ncol = 2, common.legend = TRUE, legend = "right")
+
+annotate_figure(comb.plot, top = text_grob("Combined ICE/PD Plot"))
+
+comb.plot
+
+```
+
+
