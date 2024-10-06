@@ -1,0 +1,587 @@
+---
+title: "Water Conflict Language Processing"
+author: "David Leydet"
+date: "2024-04-12"
+output:
+ html_document:
+   toc: yes
+   toc_depth: 3
+   theme: yeti
+   toc_float: yes
+---
+
+
+```{r Library, message=FALSE}
+setwd("~/Desktop/University of Utah PhD /Research/r_code/")
+
+library(tidyverse)
+library(tidytext)
+library(textstem)
+
+# set options
+options(stringsAsFactors = F)         # no automatic data transformation
+options("scipen" = 100, "digits" = 4) # suppress math annotation
+
+# activate klippy for copy-to-clipboard button
+klippy::klippy()
+
+```
+
+
+# **Data Cleaning**
+
+```{r}
+dat = read.csv("../data/pak_water_2024_run/pak_water_con_total_2010_2023_20240911.csv")
+
+str(dat)
+
+```
+
+
+```{r}
+# tidy the notes up
+# remove commas and periods
+# remove months of the year
+# remove years
+
+tidy_dat = dat %>% 
+  mutate(notes = str_replace_all(notes, ",", "")) %>% 
+  mutate(notes = str_replace_all(notes, "\\.", "")) %>% 
+  mutate(notes = str_replace_all(notes, "\\(", "")) %>% 
+  mutate(notes = str_replace_all(notes, "\\)", "")) %>% 
+  mutate(notes = str_replace_all(notes, "January|February|March|April|May|June|July| August|September|October|November|December", "")) %>% 
+  mutate(notes = str_replace_all(notes, "2010|2011|2012|2013|2014|2015|2016|2017|2018|2019|2020|2021|2022|2023", ""))
+
+head(tidy_dat$notes)
+```
+
+
+
+```{r}
+# convert the notes into individual words
+# filter the stop words out
+
+tidy_dat <- tidy_dat %>% 
+  unnest_tokens(word, notes) %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]"))
+
+
+# create a new column for the standardized lemmatized words
+tidy_dat$clean_word <- lemmatize_words(tidy_dat$word)
+
+```
+
+
+```{r}
+# check
+
+head(tidy_dat$clean_word)
+
+```
+
+
+
+```{r}
+# create a data frame of the word counts for the clean_words in the notes section
+
+tidy_count <- tidy_dat %>%
+  count(clean_word) %>%
+  arrange(-n) # arrange from largest to smallest
+
+head(tidy_count)
+
+```
+
+
+# **Exploring the Notes Data**
+
+
+```{r}
+# visualize the word cloud
+
+library(wordcloud)
+wordcloud(tidy_count$clean_word, tidy_count$n, max.words = 100)
+
+```
+
+
+
+# **Text Embedding**
+
+
+```{r}
+
+library(word2vec)
+
+model <- read.word2vec(file = "../data/twitter/GoogleNews-vectors-negative300.bin", normalize = TRUE)
+
+```
+
+
+```{r}
+# Vectorize the words using the google news vector model 
+# it creates a matrix/array
+
+vectorized_words = predict(model, tidy_dat$clean_word, 
+                           type = "embedding")
+
+```
+
+
+```{r}
+# collapse the values into mean embeddings for each notes section
+
+# create data frame
+vectorized_words = as.data.frame(vectorized_words)
+
+
+# use event_id_cnty as the id number
+vectorized_words$id = tidy_dat$event_id_cnty
+
+
+
+```
+
+
+
+```{r}
+
+#create a new df
+vectorized_docs <- vectorized_words %>% 
+  drop_na() %>% #drop nas
+  group_by(id) %>% #conduct the following lines by id
+  summarise_all(mean, na.rm = TRUE) %>% #summarise by id number mean value
+  select(-id) #drop id column
+
+```
+
+
+
+# **Cluster Analysis**
+
+```{r}
+# dimension reduction technique
+library(uwot)
+library(irlba) # ran into an error with uwot without this pacakage loaded
+library(Matrix) # ran into an error with uwot without this pacakage loaded
+
+```
+
+
+```{r}
+# create kmeans clusters (5 to start?)
+
+notes_km = kmeans(vectorized_docs, centers = 15)
+
+```
+
+
+
+
+```{r}
+# store the umap object
+
+viz <- umap(vectorized_docs, n_neighbors = 15, 
+            min_dist = 0.001, spread = 4, n_threads = 2)
+
+```
+
+
+```{r}
+#visualize using ggplot
+
+library(ggplot2)
+
+df <- data.frame(x = viz[, 1], y = viz[, 2],
+                 cluster = as.factor(notes_km$cluster),
+                 stringsAsFactors = FALSE)
+
+ggplot(df, aes(x = x, y = y, col = cluster)) +
+  geom_point() + theme_void()
+
+
+```
+
+
+# **Topic Modeling**
+
+
+
+```{r}
+
+
+# load packages
+library(knitr) 
+library(kableExtra) 
+library(DT)
+library(tm)
+library(topicmodels)
+library(reshape2)
+library(ggplot2)
+library(wordcloud)
+library(pals)
+library(SnowballC)
+library(lda)
+library(ldatuning)
+library(flextable)
+
+
+```
+
+
+```{r}
+# data re-read
+
+# load data 
+# duplicate of the original dat file (no precleaning)
+textdata <- dat
+
+# load stopwords
+english_stopwords <- readLines("https://slcladal.github.io/resources/stopwords_en.txt", encoding = "UTF-8")
+
+# rename event_id_cnty to doc_id
+# rename notes to text
+# this allows us to create a corpus object
+textdata = textdata %>% 
+  mutate(doc_id = event_id_cnty) %>% 
+  mutate(text = notes)
+
+
+# create corpus object
+corpus <- Corpus(DataframeSource(textdata))
+
+# Preprocessing chain to remove stopwords/whitespace/etc
+processedCorpus <- tm_map(corpus, content_transformer(tolower))
+processedCorpus <- tm_map(processedCorpus, removeWords, english_stopwords)
+processedCorpus <- tm_map(processedCorpus, removePunctuation, preserve_intra_word_dashes = TRUE)
+processedCorpus <- tm_map(processedCorpus, removeNumbers)
+processedCorpus <- tm_map(processedCorpus, stemDocument, language = "en")
+processedCorpus <- tm_map(processedCorpus, stripWhitespace)
+
+```
+
+
+## **Model Build**
+
+```{r}
+
+# compute document term matrix with terms >= minimumFrequency
+# 5 to start
+minimumFrequency <- 5
+
+DTM <- DocumentTermMatrix(processedCorpus, control = list(bounds = list(global = c(minimumFrequency, Inf))))
+
+# have a look at the number of documents and terms in the matrix
+dim(DTM)
+
+```
+
+
+```{r}
+# remove empty rows (there are none)
+
+# due to vocabulary pruning, we have empty rows in our DTM
+# LDA does not like this. So we remove those docs from the
+# DTM and the metadata
+sel_idx <- slam::row_sums(DTM) > 0
+DTM <- DTM[sel_idx, ]
+textdata <- textdata[sel_idx, ]
+
+dim(DTM)
+
+```
+
+
+```{r}
+# determine the number of topics (K)
+
+# create models with different number of topics
+result <- ldatuning::FindTopicsNumber(
+  DTM,
+  topics = seq(from = 2, to = 20, by = 1), # exploring the optimal number of topics from 2-20. May need to adjust.
+  metrics = c("CaoJuan2009",  "Deveaud2014"),
+  method = "Gibbs",
+  control = list(seed = 77),
+  verbose = TRUE
+)
+
+
+```
+
+
+```{r}
+
+FindTopicsNumber_plot(result)
+
+# Reminder
+# he best number of topics shows low values for CaoJuan2009 and high values for Griffith2004
+# Run it for K=8?
+
+```
+
+
+```{r}
+
+# number of topics
+# initial start at 8
+# rerun at 13
+# rerun 4
+
+K <- 4
+
+# set random number generator seed
+set.seed(147)
+
+# compute the LDA model, inference via 1000 iterations of Gibbs sampling
+topicModel <- LDA(DTM, K, method="Gibbs", control=list(iter = 500, verbose = 25))
+
+```
+
+## **Results**
+
+```{r}
+# The topic model inference results in two (approximate) posterior probability distributions: a distribution theta over K topics within each document and a distribution beta over V terms within each topic, where V represents the length of the vocabulary of the collection (V = 1289). 
+
+
+# have a look a some of the results (posterior distributions)
+tmResult <- posterior(topicModel)
+
+# format of the resulting object
+attributes(tmResult)
+
+```
+
+
+```{r}
+# number of terms
+# matches our initial dimensions of the DTM
+
+nTerms(DTM)              
+
+```
+
+
+```{r}
+
+# topics are probability distributions over the entire vocabulary
+beta <- tmResult$terms   # get beta (probability distribution for terms) from results
+
+dim(beta)                # K distributions over nTerms(DTM) terms
+
+```
+
+
+```{r}
+
+ # ensure rows in beta sum to 1 (the probabilities should sum to 1!)
+
+rowSums(beta)           
+
+```
+
+
+
+```{r}
+# size of collection (in this case the number of events)
+
+nDocs(DTM)               
+
+```
+
+
+```{r}
+
+# for every document we have a probability distribution of its contained topics
+theta <- tmResult$topics 
+dim(theta)               # nDocs(DTM) distributions over K topics
+```
+
+
+```{r}
+# probabilities should add to 1
+# ensure the correct number of rows are set (K=8)
+
+rowSums(theta)[1:4]     # rows in theta sum to 1
+
+```
+
+
+
+```{r}
+# ten most likely terms of the term probabilities beta of the inferred topics
+
+terms(topicModel, 10)
+
+```
+
+```{r}
+# example term dataframe
+
+exampleTermData <- terms(topicModel, 10)
+
+exampleTermData[, 1:4]
+
+```
+
+
+```{r}
+# replace topic numbers with names
+
+# top 5 terms per topic
+top5termsPerTopic <- terms(topicModel, 5)
+
+# paste
+topicNames <- apply(top5termsPerTopic, 2, paste, collapse=" ")
+
+```
+
+
+## **Visualizations**
+
+**Think about NOT lemmitizing the words**
+
+
+```{r}
+
+# visualize topics as word cloud
+topicToViz <- 1 # change for your own topic of interest
+
+#topicToViz <- grep('Sindh', topicNames)[1] # Or select a topic by a term contained in its name
+
+# select to 40 most probable terms from the topic by sorting the term-topic-probability vector in decreasing order
+top40terms <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+words <- names(top40terms)
+
+# extract the probabilites of each of the 40 terms
+probabilities <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+
+# visualize the terms as wordcloud
+mycolors <- brewer.pal(8, "Dark2")
+wordcloud(words, probabilities, random.order = FALSE, color = mycolors)
+
+
+```
+
+
+```{r}
+
+# **TOPIC 8**
+
+# visualize topics as word cloud
+topicToViz <- 4 # change for your own topic of interest
+
+#topicToViz <- grep('Sindh', topicNames)[1] # Or select a topic by a term contained in its name
+
+# select to 40 most probable terms from the topic by sorting the term-topic-probability vector in decreasing order
+top40terms <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+words <- names(top40terms)
+
+# extract the probabilites of each of the 40 terms
+probabilities <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+
+# visualize the terms as wordcloud
+mycolors <- brewer.pal(8, "Dark2")
+wordcloud(words, probabilities, random.order = FALSE, color = mycolors)
+
+
+```
+
+
+
+## **Topic Distributions**
+
+
+### **Topic Ranking**
+
+
+```{r}
+
+# What are the most probable topics in the entire collection?
+
+topicProportions <- colSums(theta) / nDocs(DTM)  # mean probabilities over all notes
+names(topicProportions) <- topicNames     # assign the topic names we created before
+sort(topicProportions, decreasing = TRUE) # show summed proportions in decreased order
+
+```
+
+```{r}
+
+soP <- sort(topicProportions, decreasing = TRUE)
+paste(round(soP, 5), ":", names(soP))
+
+```
+
+The following code counts the number of topics that appear throughout the notes -
+
+```{r}
+
+# Count of topics throughout the notes
+
+countsOfPrimaryTopics <- rep(0, K)
+
+names(countsOfPrimaryTopics) <- topicNames
+
+for (i in 1:nDocs(DTM)) {
+  topicsPerDoc <- theta[i, ] # select topic distribution for document i
+  # get first element position from ordered list
+  primaryTopic <- order(topicsPerDoc, decreasing = TRUE)[1] 
+  countsOfPrimaryTopics[primaryTopic] <- countsOfPrimaryTopics[primaryTopic] + 1
+}
+
+sort(countsOfPrimaryTopics, decreasing = TRUE)
+
+```
+4
+Sort from highest count to lowest -
+
+```{r}
+
+so <- sort(countsOfPrimaryTopics, decreasing = TRUE)
+paste(so, ":", names(so))
+
+```
+
+
+## **Topic Proportions over Time**
+
+
+```{r}
+
+# append decade information for aggregation
+
+# textdata$decade <- textdata$year
+
+
+# get mean topic proportions per decade
+#topic_proportion_per_decade <- aggregate(theta, by = list(decade = textdata$decade), mean)
+topic_proportion_per_year <- aggregate(theta, by = list(year = textdata$year), mean)
+
+# set topic names to aggregated columns
+#colnames(topic_proportion_per_decade)[2:(K+1)] <- topicNames
+colnames(topic_proportion_per_year)[2:(K+1)] <- topicNames
+
+# reshape data frame
+#vizDataFrame <- melt(topic_proportion_per_decade, id.vars = "decade")
+vizDataFrame <- melt(topic_proportion_per_year, id.vars = "year")
+
+# plot topic proportions per decade as bar plot
+#ggplot(vizDataFrame, aes(x=decade, y=value, fill=variable)) + 
+  #geom_bar(stat = "identity") + ylab("proportion") + 
+  #scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "decade") + 
+  #theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplot(vizDataFrame, aes(x=year, y=value, fill=variable)) + 
+  geom_bar(stat = "identity") + ylab("proportion") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "Topics") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+
+
+
+
+
+
