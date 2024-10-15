@@ -1,0 +1,271 @@
+---
+title: "Pakistan Water Conflict"
+author: "David Leydet"
+date: "2024-06-26"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+
+# **Set up**
+
+
+```{r Working Dir, message=FALSE, warning=FALSE}
+# set working directory
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code/")
+
+# load the usual libraries
+library(tidyverse) #core packages of tidyverse
+library(janitor) # count/summary package
+
+```
+
+
+
+```{r ACLED Data Load}
+# ACLED Data Load
+# This is the complete Pakistan ACLED data from January 1, 2010 - December 31, 2023
+pak = read.csv("../data/pak_water_2024_run/pak_con_overall_2010_2023.csv")
+
+# check 
+str(pak)
+
+```
+
+
+```{r}
+## Total Conflict Counts by district
+library(janitor)
+
+pak.counts = janitor::tabyl(dat = pak, admin2, year)
+
+pak.counts
+
+```
+
+
+```{r}
+# rename column names
+col.name.change = c(admin2 = "admin2", total.2010 = "2010", total.2011 = "2011", total.2012 = "2012", total.2013 = "2013", total.2014 = "2014", total.2015 = "2015", total.2016 = "2016", total.2017 = "2017", total.2018 = "2018", total.2019 = "2019", total.2020 = "2020", total.2021 = "2021", total.2022 = "2022", total.2023 = "2023")
+
+# change the column names and remove the admin2 row that is blank (these are sea-based conflicts)
+pak.counts.2 = pak.counts %>% 
+  rename(all_of(col.name.change)) %>% 
+  dplyr::filter(admin2 !="")
+
+str(pak.counts.2)
+
+```
+
+
+
+```{r Extract Water-related conflicts}
+
+## Extract Water Events (Wolf et al., 2003 methodology for key terms)
+
+water = dplyr::filter(pak, grepl("water|flood|^rain|^river|snow|lake|^dam|stream|tributary|irrigation|diversion|drought|channel|canal|fish|resorvoir|hydroelect", pak$notes, ignore.case = TRUE))
+
+# visual check (complete)
+#view(water)
+
+# NA check
+#na_counts = water |>
+  #summarise_all( ~ sum(is.na(.)))
+
+#print(na_counts)
+
+```
+
+```{r}
+# Identify the NAs
+
+blank = water %>% 
+  dplyr::filter(admin2 == "")
+
+print(blank)
+
+```
+
+```{r write water csv}
+## remove the NAs (see notes about the 6 observations removed - all were sea-based disputes with India)
+# start with 4763 obs
+
+water = water %>% 
+  dplyr::filter(admin2 !="")
+
+str(water)
+
+# end with 4757 obs
+
+# write csv
+
+#write.csv(water, file = "../data/pak_water_2024_run/pak_water_con_total_2010_2023_20240911.csv")
+
+```
+
+
+
+```{r Count by district}
+# count by district
+
+#water %>% 
+  #group_by(admin2) %>% 
+  #count(year) %>% 
+  #ungroup() %>% 
+  
+
+```
+
+
+```{r Counts by district data frame}
+# create a new data frame with the counts by district
+
+#dis.counts = water %>% 
+  #group_by(admin2) %>% 
+  #count(year) %>% 
+  #ungroup() %>% 
+  #dplyr::filter(admin2 != "") # remove the NAs (see notes about the 6 observations removed - all were sea-based disputes with India)
+
+#print(dis.counts)
+
+```
+
+```{r write district counts}
+# write the district counts to a csv file
+
+#write.csv(dis.counts, file = "../data/pak_water_2024_run/pak_water_con_district_counts_20240911.csv")
+
+
+```
+
+
+```{r District Names}
+# test vector of the district names to ensure they match with the GeoQuery admin 2 spatial units
+
+#adm2 = unique(water$admin2)
+
+```
+
+
+
+# **Pak Water Excel Data Cleaning**
+
+The following code cleans up the Pakistan Water Conflict Total file. We need to count the conflicts by district from 2010-2023. Then, we need to merge this file with our GeoQuery covariates to complete the data frame for analysis. 
+
+
+```{r}
+# Ensure you read in the pak_water_con_total_2010_2023_2024_0911.csv file
+# This is the subset of the overall ACLED data 
+
+
+df = read.csv("../data/pak_water_2024_run/pak_water_con_total_2010_2023_20240911.csv")
+
+
+```
+
+
+```{r}
+# counts using janitor
+# district data frame counts by year
+
+library(janitor)
+
+dis.df = janitor::tabyl(dat = df, admin2, year) 
+
+
+# check
+str(dis.df)
+
+
+```
+
+
+```{r}
+
+# write the dis.df to csv
+# combine this with the pak_geoquery_20241006_preprocess.csv file
+
+#write.csv(dis.df, file = "../data/pak_water_2024_run/district_counts_20241007.csv")
+
+```
+
+
+## **Merge dataframes**
+
+Merge the pak_geoquery_20241006_preprocess.csv file and the dis.df dataframe. This combines the variables from geoquery with the ACLED water conflict counts. 
+
+```{r}
+
+# rename column names
+water.col.name.change = c(admin2 = "admin2", water.2010 = "2010", water.2011 = "2011", water.2012 = "2012", water.2013 = "2013", water.2014 = "2014", water.2015 = "2015", water.2016 = "2016", water.2017 = "2017", water.2018 = "2018", water.2019 = "2019", water.2020 = "2020", water.2021 = "2021", water.2022 = "2022", water.2023 = "2023")
+
+# change the column names and remove the admin2 row that is blank (these are sea-based conflicts)
+dis.df.2 = dis.df %>% 
+  rename(all_of(water.col.name.change)) %>% 
+  dplyr::filter(admin2 !="")
+
+str(dis.df.2)
+
+```
+
+
+```{r}
+# merge the pak.counts.2 (total conflict counts) along with the water conflict dataframe
+
+con.counts.full.df = full_join(x = dis.df.2, y = pak.counts.2, by = "admin2")
+
+view(con.counts.full.df)
+
+```
+
+
+```{r}
+# add percentage column to 
+
+con.counts.full.df = con.counts.full.df %>% 
+  mutate(perc.2010 = (water.2010/total.2010)*100) %>% 
+  mutate(perc.2011 = (water.2011/total.2011)*100) %>% 
+  mutate(perc.2012 = (water.2012/total.2012)*100) %>% 
+  mutate(perc.2013 = (water.2013/total.2013)*100) %>% 
+  mutate(perc.2014 = (water.2014/total.2014)*100) %>% 
+  mutate(perc.2015 = (water.2015/total.2015)*100) %>% 
+  mutate(perc.2016 = (water.2016/total.2016)*100) %>% 
+  mutate(perc.2017 = (water.2017/total.2017)*100) %>% 
+  mutate(perc.2018 = (water.2018/total.2018)*100) %>% 
+  mutate(perc.2019 = (water.2019/total.2019)*100) %>% 
+  mutate(perc.2020 = (water.2020/total.2020)*100) %>% 
+  mutate(perc.2021 = (water.2021/total.2021)*100) %>% 
+  mutate(perc.2022 = (water.2022/total.2022)*100) %>% 
+  mutate(perc.2023 = (water.2023/total.2023)*100) 
+  
+
+# replace NaNs with 0
+# NaNs were generated by a divisor - in this case the total number of conflicts - of zero
+
+con.counts.full.df[is.na(con.counts.full.df)] = 0
+
+summary(con.counts.full.df)
+
+```
+
+```{r}
+#write the combined file
+
+#write.csv(con.counts.full.df, file = "../data/pak_water_2024_run/conflict_full_df_20231007.csv" )
+
+```
+
+
+
+
+
+

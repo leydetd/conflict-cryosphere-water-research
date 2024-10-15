@@ -1,0 +1,240 @@
+---
+title: "Pakistan Water Conflict Data Cleaning Pt 2"
+author: "David Leydet"
+date: "2024-10-09"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+
+This step takes our wide data frame (pak_water_complete_df_20241007_v2), converts it to long form, and imputes missing variables using missForest.
+
+
+```{r}
+# setwd
+
+setwd("../r_code/")
+
+```
+
+
+# **Initial Data Read and Pivot**
+
+
+```{r}
+
+wide = read.csv("../data/pak_water_2024_run/pak_water_complete_df_20241007_v2.csv")
+
+str(wide)
+
+```
+
+
+```{r}
+library(tidyverse)
+
+# convert each column (except the first one - admin2) to numeric
+
+wide[ ,2:310] <- sapply(wide[,2:310], as.numeric)
+
+#check
+str(wide)
+
+
+
+```
+
+
+
+
+```{r}
+# pivot to long data frame
+
+long = wide %>% 
+  pivot_longer(cols = -c(admin2),
+    names_sep = "\\.",
+    names_to = c(".value", "year")
+  )
+
+#check
+str(long)
+
+#summary
+summary(long)
+
+#visual check
+#write.csv(long, file = "~/Desktop/pak_water_long_check.csv")
+
+```
+
+
+Think about removing the Indian Occupied Kashmir observations. There are no conflict observations in the ACLED data for Pakistan in this area. It is likely coded for India. 
+
+Run two versions of the model?
+
+
+# **missForest Imputation**
+
+
+This section of code imputes variables with NAs using missForest.
+
+The following imputation uses the missForest R package. Details on the imputation procedures can be found [here](https://cran.r-project.org/web/packages/missForest/missForest.pdf).
+
+**Note:** missForest requires the use of a data frame object (not a tibble), factors (not characters) for non-numeric data, and cannot impute with a large number of classes. In this case we change country, adm1, and year in to factors or numerics. We subsequently removed the adm1 from the data frame for imputation, then return it afterwards.
+
+Additionally, the missForest object stores two things:
+1. ximp - this contains the imputed data frame.
+2. OOB Error - this is the Normalized RMSE error associated with the imputation.
+
+
+```{r}
+
+# create a new dataframe
+long.mf = long %>% 
+  mutate(admin2 = as.factor(admin2)) %>% # missForest requires admin2 to be a factor
+  mutate(year = as.numeric(year)) # needs to be numeric not character
+
+# convert from tibble to dataframe
+long.mf = as.data.frame(long.mf)
+
+# write this data frame (to use for modeling)
+#write.csv(long.mf, file = "../data/pak_water_2024_run/pak_water_long_nonimp_20241010.csv")
+
+# Note - every row (observation) has some NAs.
+
+# remove the admin2 for missForest to run correctly. We will add this back after the imputation
+long.mf.no.admin2 = long.mf %>% 
+  select(-admin2)
+
+#check
+str(long.mf.no.admin2)
+
+```
+
+
+
+```{r}
+# run missForest
+library(missForest)
+
+long.impute = missForest(long.mf.no.admin2)
+
+# save the dataframe
+long.impute.df = long.impute$ximp
+
+
+
+```
+
+## **Check Imputation**
+
+```{r}
+# OOB error
+long.impute$OOBerror
+
+
+```
+
+
+
+```{r}
+##Check the imputation to see how well it did
+##nlights
+plot(density(long$landscan_global_population, na.rm=TRUE))
+lines(density(long.impute$ximp$landscan_global_population), col = "red", lty = 2)
+
+##conflict
+plot(density(long$total, na.rm=TRUE))
+lines(density(long.impute$ximp$total), col = "red", lty = 2)
+
+```
+
+```{r}
+
+density.plot = function(x){
+  plot(density(long$x, na.rm=TRUE))
+lines(density(long.impute$ximp$x), col = "red", lty = 2)
+}
+
+lapply(names(long.mf.no.admin2), density.plot)
+
+for (i in colnames(long.mf.no.admin2)){
+  plot(density(long$[[i]], na.rm=TRUE))
+  lines(density(long.impute$ximp$[[i]]), col = "red", lty = 2)
+}
+
+```
+
+
+```{r}
+library(ggplot2)
+
+long_imp = long.impute$ximp
+
+# create a long df for the imputed data
+long_imp_long <- long_imp |>
+  pivot_longer(cols = names(long_imp), names_to = "var") |>
+  mutate(imputed = "1")
+
+# create a long df for the raw data
+long_raw_long <- long.mf |>
+  select(!admin2) |>
+  pivot_longer(cols = names(long.mf[, -1]), names_to = "var") |> # long.mf[,-1] removes the admin2 row
+  mutate(imputed = "0")
+
+long_combined <- rbind(long_imp_long, long_raw_long)
+
+ggplot(long_combined, aes(value, colour = imputed)) +
+  geom_density() +
+  facet_wrap(~var, scales = "free")
+
+
+```
+
+
+## **New Complete Dataframe**
+
+```{r}
+## add back in admin2
+
+long.impute.df$admin2 = long$admin2
+
+# relocate admin2 before year
+long.impute.df = long.impute.df %>% 
+  relocate(admin2, .before = year)
+
+# check
+str(long.impute.df)
+
+# write the df
+#write.csv(long.impute.df, file = "../data/pak_water_2024_run/pak_water_imputed_df_full_20241010.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
