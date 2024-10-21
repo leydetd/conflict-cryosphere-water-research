@@ -1,0 +1,717 @@
+---
+title: "Pakistan Water Conflict Analysis"
+author: "David Leydet"
+date: "2024-10-15"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+# **Introduction**
+
+This document contains the data analysis for modeling Pakistan water conflict from 2010-2023. This analysis uses cleaned data (pak_water_imputed_df_full_20241010.csv) from the .rmd file Pakistan Water Conflict Data Cleaning Pt 2.
+
+
+- Packages needed for analysis include:
+  + tidyverse
+  + ggpubr
+  + iml
+  + randomForest
+  + gridExtra
+  + hrbrthemes
+  + 
+  
+  
+```{r}
+# set working directory
+
+setwd("~/Desktop/University of Utah PhD /Research/r_code")
+
+```
+  
+
+
+
+# **Initial Data Read**
+
+```{r}
+library(tidyverse)
+
+pak = read.csv("../data/pak_water_2024_run/cleaned data/pak_water_imputed_df_full_20241010.csv")
+
+# check
+#str(pak)
+#summary(pak)
+
+# Rename variables to easily interpretable names
+pak = pak %>% 
+  dplyr::rename(pop = landscan_global_population) %>% 
+  dplyr::rename(nlights_v21 = viirs_ntl_annual_v21_avg_masked) %>% 
+  dplyr::rename(nlights_v22 = viirs_ntl_annual_v22_avg_masked) %>% 
+  dplyr::rename(temp = cru_ts_407_tmp_yearly_mean) %>% 
+  dplyr::rename(precip = cru_ts_407_pre_yearly_mean) %>% 
+  dplyr::rename(landcover_count = esa_landcover_categorical_count) %>% 
+  dplyr::rename(mosiac_cropland = esa_landcover_categorical_mosaic_cropland) %>% 
+  dplyr::rename(rainfed_cropland = esa_landcover_categorical_rainfed_cropland) %>% 
+  dplyr::rename(grassland = esa_landcover_categorical_grassland) %>%
+  dplyr::rename(urban = esa_landcover_categorical_urban) %>% 
+  dplyr::rename(wetland = esa_landcover_categorical_wetland) %>% 
+  dplyr::rename(forest = esa_landcover_categorical_forest) %>% 
+  dplyr::rename(irrigated_cropland = esa_landcover_categorical_irrigated_cropland) %>% 
+  dplyr::rename(bare_areas = esa_landcover_categorical_bare_areas) %>% 
+  dplyr::rename(sparse_vegetation = esa_landcover_categorical_sparse_vegetation) %>% 
+  dplyr::rename(water_bodies = esa_landcover_categorical_water_bodies) %>% 
+  dplyr::rename(shrubland = esa_landcover_categorical_shrubland) %>% 
+  dplyr::rename(snow_ice = esa_landcover_categorical_snow_ice) %>% 
+  dplyr::rename(ndvi = ltdr_avhrr_ndvi_v5_yearly)
+
+# **Run 1**
+# remove X and esa_landcover_categorical_no_data from the data frame
+# change admin2 to a factor
+
+#pak = pak %>% 
+  #select(-X, -esa_landcover_categorical_no_data) %>% 
+  #mutate(admin2 = as.factor(admin2))
+
+
+# **Run 2**
+# remove X, esa_landcover_categorical_no_data from the data frame, total, and perc
+# change admin 2 to a factor
+
+pak = pak %>% 
+  dplyr::select(-X, -esa_landcover_categorical_no_data, -total, -perc) %>% 
+  mutate(admin2 = as.factor(admin2)) %>% 
+  mutate(year = as.numeric(year)) 
+
+
+# **Run 3**
+# perc ~ .
+# remove X, esa_landcover_categorical_no_data from the data frame, total, and water
+# change admin 2 to a factor
+
+#pak = pak %>% 
+  #dplyr::select(-X, -esa_landcover_categorical_no_data, -total, -water) %>% 
+  #mutate(admin2 = as.factor(admin2)) %>% 
+  #mutate(year = as.numeric(year)) 
+
+# check
+str(pak)
+
+
+## correlation plot!
+```
+
+
+
+
+# **Data Analysis**
+
+```{r, message=FALSE}
+# load libraries
+# randomForest - to train and run the initial model **NOTE: This pacakage cannot handle a factor with more than 53 categories. Need to use an alternative random forest pacakge
+
+# iml - to assist with interpretation and plotting
+
+library(randomForest)
+library(iml)
+
+
+# load tidymodels 
+library(tidymodels)
+library(workflows)
+library(tune)
+
+
+```
+
+
+## **Tidymodels Random Forest**
+
+**Note** - There are 149 levels to our administrative level 2 variable. The randomForest package cannot handle that many levels. We use tidymodels to run our initial models. This code is adapted from Rebecca Barter's blog located [here](https://rebeccabarter.com/blog/2020-03-25_machine_learning).
+
+```{r, message=FALSE}
+
+# run the random forest with tidymodels
+# see 
+
+# split into training and test
+set.seed(47832)
+
+# 80%/20% split
+pak.split = initial_split(data = pak,
+                          prop = 4/5)
+
+pak.split
+
+
+```
+
+
+```{r}
+# create a cross-validation object from the training portion of the data set
+
+pak.cv = vfold_cv(training(pak.split))
+
+```
+
+
+### **Recipe Build**
+
+```{r}
+# recipes define the roles of each variable (outcome or predictor) and perform any preprocessing steps
+# change the formula as needed for each model run
+
+pak.recipe = recipe(water ~ .,
+                    data = pak)
+
+# recipes just take the variable names, so we can use the original data frame
+
+# print a summary of the recipe
+# shows the variable summary and any pre-processing steps we conducted
+pak.recipe
+
+```
+
+### **Model Build**
+
+```{r}
+# load parsnip - this package standardizes one interface for a variety of models in the R universe
+library(parsnip)
+
+# specify our random forest
+rf.model = rand_forest() %>% # random forest selected
+  set_args(mtry = tune()) %>%  # the number of splits needs to be tuned later in our code
+  set_engine("ranger", importance = "permutation") %>%  # permutation gives a measure of feature importance
+  set_mode("regression") # regression (in our case water conflicts counts) vs classification outcome
+
+  
+```
+
+
+### **Workflow**
+
+
+```{r}
+# initiate the work flow
+
+rf.workflow = workflow() %>% 
+  add_recipe(pak.recipe) %>%  # add the recipe
+  add_model(rf.model) # add the model
+
+```
+
+
+### **Parameter Tuning**
+
+```{r}
+# tune the selected parameters
+# in our case, the number of tree splits (mtry)
+
+detach("package:yardstick", unload = TRUE) # reloading the package helps with the error
+library(yardstick)
+
+# specify the range of values we'd like to test for mtry
+rf.grid = expand.grid(mtry = seq(from = 3, to = 10, by = 1))
+
+# extract results
+rf.tune.results = rf.workflow %>% 
+  tune_grid(resamples = pak.cv, # us the cross-validation object (separate from the testing set)
+            grid = rf.grid, # the values to try within our model/workflow
+            metrics = metric_set(rmse)) # performance metrics
+
+
+# **NOTE** this chunk can produce an error if the ______ package is loaded
+
+```
+
+
+```{r}
+# check the results
+tune.results = rf.tune.results %>% 
+  collect_metrics()
+
+# add in percentage error
+tune.results = tune.results %>% 
+  mutate(perc.error = mean/diff(range(pak$water)))
+
+# check
+print(tune.results)
+
+# all treee splits perform fairly well. Just a question of processing time and accuracy
+
+```
+
+
+### **Finalize the workflow**
+
+```{r}
+# select the best metric
+param.final = rf.tune.results %>% 
+  select_best(metric = "rmse")
+
+# check
+param.final
+```
+
+```{r}
+# add the parameter to the workflow
+rf.workflow = rf.workflow %>% 
+  finalize_workflow(param.final)
+
+```
+
+
+
+### **Run the Model**
+
+```{r}
+# use the last fit function to run the model on the training data then evaluate on the test set
+
+rf.fit = rf.workflow %>% last_fit(pak.split)
+
+rf.fit
+```
+
+
+```{r}
+# check the performance of the model on the test set
+test.performance = rf.fit %>% collect_metrics()
+
+print(test.performance)
+```
+
+```{r}
+# percentage error
+# change for the outcome variable as needed
+
+test.performance$.estimate[1] / diff(range(pak$water))
+
+```
+
+
+
+### **Variable Importance Measures**
+
+```{r}
+# extract the final model
+final.model = fit(rf.workflow, pak)
+
+# view the model
+final.model
+
+```
+
+```{r}
+# extract the ranger object from the model
+ranger.obj = pull_workflow_fit(final.model)$fit
+
+# check
+ranger.obj
+
+```
+
+
+# **iml Analysis**
+
+This section uses the iml package to explore the variable importance, partial dependence plots, and individual conditional expectation plots for our model. 
+
+
+```{r}
+# create a predictor object
+
+## Create a data frame with the features minus the target
+x = pak %>% 
+  dplyr::select(-water)
+
+# Store the data and con in the predictor container along with the randomForest parameters
+
+predictor = Predictor$new(model = ranger.obj,
+                          data = x,
+                          y = pak$water)
+
+```
+
+
+```{r message=FALSE}
+## Store the features in a FeatureImp object
+## loss argument specifies the performance measure for error
+importance = FeatureImp$new(predictor = predictor,
+                     loss = "rmse")
+
+```
+
+
+```{r}
+## Visualize the importance using ggplot2
+
+##Plot
+plot(importance)
+
+
+# think about removing total and perc from the analysis (its too colinear because water is a subset of total and used to calculate perc)
+
+```
+
+
+```{r}
+## View the the feature importance percentiles
+importance$results
+
+```
+
+
+## **Partial Dependence and Individual Conditional Expectation Plots**
+
+```{r warning=FALSE}
+
+rf.temp = Partial$new(predictor = predictor,
+                        feature = "temp",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.nlights.v22 = Partial$new(predictor = predictor,
+                        feature = "nlights_v22",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.pop = Partial$new(predictor = predictor,
+                        feature = "pop",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.wb = Partial$new(predictor = predictor,
+                        feature = "water_bodies",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+
+# center (this centers the impact of y hat on a starting value)
+rf.temp$center(min(pak$temp))
+rf.nlights.v22$center(min(pak$nlights_v22))
+rf.pop$center(min(pak$pop))
+rf.wb$center(min(pak$water_bodies))
+
+```
+
+
+```{r message=FALSE}
+library(gridExtra)
+
+# plot
+p1 = plot(rf.temp) + ggtitle("Temperature PDP/ICE Plot")
+p2 = plot(rf.nlights.v22) + ggtitle("Night-time Lights PDP/ICE Plot")
+p3 = plot(rf.pop) + ggtitle("Population PDP/ICE Plot")
+p4 = plot(rf.wb) + ggtitle("Water Bodies PDP/ICE Plot")
+
+gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+```
+
+
+```{r warning=FALSE}
+
+rf.wetland = Partial$new(predictor = predictor,
+                        feature = "wetland",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.nlights.v21 = Partial$new(predictor = predictor,
+                        feature = "nlights_v21",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.year = Partial$new(predictor = predictor,
+                        feature = "year",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.precip = Partial$new(predictor = predictor,
+                        feature = "precip",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+
+# center (this centers the impact of y hat on a starting value)
+rf.wetland$center(min(pak$wetland))
+rf.nlights.v21$center(min(pak$nlights_v21))
+rf.year$center(min(pak$year))
+rf.precip$center(min(pak$precip))
+
+```
+
+
+```{r message=FALSE}
+
+
+# plot
+p5 = plot(rf.wetland) + ggtitle("Wetland PDP/ICE Plot")
+p6 = plot(rf.nlights.v21) + ggtitle("Night-time Lights V21 PDP/ICE Plot")
+p7 = plot(rf.year) + ggtitle("Year PDP/ICE Plot")
+p8 = plot(rf.precip) + ggtitle("Precipitation PDP/ICE Plot")
+
+gridExtra::grid.arrange(p5, p6, p7, p8, nrow = 2)
+
+
+```
+
+
+```{r warning=FALSE}
+
+rf.cropland = Partial$new(predictor = predictor,
+                        feature = "irrigated_cropland",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.urban = Partial$new(predictor = predictor,
+                        feature = "urban",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.ndvi = Partial$new(predictor = predictor,
+                        feature = "ndvi",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.rainfed = Partial$new(predictor = predictor,
+                        feature = "rainfed_cropland",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+
+# center (this centers the impact of y hat on a starting value)
+rf.cropland$center(min(pak$irrigated_cropland))
+rf.urban$center(min(pak$urban))
+rf.ndvi$center(min(pak$ndvi))
+rf.rainfed$center(min(pak$rainfed_cropland))
+
+```
+
+
+```{r message=FALSE}
+
+
+# plot
+p9 = plot(rf.cropland) + ggtitle("Irrigated Cropland PDP/ICE Plot")
+p10 = plot(rf.urban) + ggtitle("Urban PDP/ICE Plot")
+p11 = plot(rf.ndvi) + ggtitle("NDVI PDP/ICE Plot")
+p12 = plot(rf.rainfed) + ggtitle("Rainfed Cropland PDP/ICE Plot")
+
+gridExtra::grid.arrange(p9, p10, p11, p12, nrow = 2)
+
+
+```
+
+
+```{r}
+# other PDP/ICE
+
+rf.sparse = Partial$new(predictor = predictor,
+                        feature = "sparse_vegetation",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+rf.sparse$center(min(pak$sparse_vegetation))
+
+plot(rf.sparse)
+
+```
+
+
+There are several other variables we can plot. Which ones should we prioritize? Top 5? Top 10? 
+
+
+## **Variable Interactions**
+
+```{r}
+st = Sys.time()
+##Set up the interactions wrapper
+##Play around with grid.size
+
+interact = Interaction$new(predictor = predictor,
+                           grid.size = 15)
+
+et = Sys.time()
+print(et-st)
+```
+
+
+```{r}
+##Plot the features to see how the interact with any other feature in the data
+# scale 0 - 1 with 1 meaning that 100% of the variance is explained with interactions with the other features
+plot(interact)
+
+```
+
+
+
+## **Vivid Variable Importance and Interaction Visualiztions**
+
+This section visualizes the variable importance and interaction measures using the vivid package. See this [website](https://alaninglis.github.io/vivid/articles/vividVignette.html) for more information. 
+
+```{r}
+# install the packages
+#install.packages("vivid")
+#install.packages("zenplots")
+#install.packages("BiocManager")
+
+
+
+library(vivid)
+library(BiocManager)
+
+```
+
+
+```{r}
+# visualization test
+
+set.seed(17789)
+
+viviRf  <- vivi(fit = ranger.obj, 
+                data = pak, #which data frame?
+                response = "water",
+                gridSize = 50,
+                importanceType = "agnostic",
+                nmax = 500,
+                reorder = TRUE,
+                predictFun = NULL,
+                numPerm = 4,
+                showVimpError = FALSE)
+
+
+```
+
+
+### **Heatmap Plot**
+
+From Alan Inglis page - "The viviHeatmap function generates a heatmap that displays variable importance and interactions, with importance values on the diagonal and interaction values on the off-diagonal."
+
+
+```{r}
+# heatmap plot
+
+viviHeatmap(mat = viviRf,
+            angle = 90, # rotate x-axis labels
+            border = TRUE) # black border around the diagonal elements
+
+```
+
+
+
+### **Network Plot**
+
+"With viviNetwork, a network graph is produced to visualize both importance and interactions."
+
+```{r}
+# network plot
+
+# required packages
+library(network) 
+library(sna)
+library(scales)
+library(intergraph)
+
+#visualize 
+viviNetwork(mat = viviRf)
+```
+
+
+```{r}
+# remove nodes below a certain threshold
+
+viviNetwork(mat = viviRf,
+            intThreshold = 0.20, # removes connections if the interaction threshold is below this value
+            removeNode = TRUE) # removes nodes if the connection is below the threshold value
+```
+
+
+**Clustered Network**
+
+"Finally, for the network plot to highlight any relationships in the model fit, we can cluster variables together using the cluster argument. This argument can either accept a vector of cluster memberships for nodes or an igraph package clustering function. In the following example, we manually select variables with VIVI values in the top 20%. This selection allows us to focus only on the variables with the most impact on the response. The variables that remain are 𝑥1.
+
+We then perform a hierarchical clustering treating variable interactions as similarities, with the goal of grouping together high-interaction variables. Here we manually select the number of groups we want to show via the cutree function (which cuts clustered data into a desired number of groups). Finally we rearrange the layout using igraph. Here, igraph::layout_as_star places the first variable (deemed most relevant using the VIVI seriation process) at the center, emphasizes its key role as the most important predictor which also has the strongest interactions."
+
+
+```{r}
+
+set.seed(1756)
+
+# clustered and filtered network for rf
+intVals <- viviRf #duplicate the viviRF matrix
+diag(intVals) <- NA #replace the diagonal values to NA
+
+
+# select VIVI values in top 20%
+impTresh <- quantile(diag(viviRf),.8)
+intThresh <- quantile(intVals,.8,na.rm=TRUE)
+sv <- which(diag(viviRf) > impTresh |
+              apply(intVals, 1, max, na.rm=TRUE) > intThresh)
+
+# cluster
+h <- hclust(-as.dist(viviRf[sv,sv]), method="single")
+
+viviNetwork(viviRf[sv,sv],
+            cluster = cutree(h, k = 3), # specify number of groups
+            layout = igraph::layout_as_star)
+
+```
+
+
+**Univariate PDP/ICE Visualizations**
+
+These seem less interpretable?
+
+```{r}
+library(lemon)
+
+# extract the first five variables from our matrix to plot
+#top5 <- colnames(viviRf)[1:5]
+top5 = c("temp", "pop", "nlights_v22", "water_bodies") #no admin2...too many categories
+
+pdpVars(data = pak,
+        fit = ranger.obj,
+        response = 'water',
+        vars = top5,
+        nIce = 1000) #number of ice curves plotted
+```
+
+
+**Generalized PDP Pairs**
+
+"By employing a matrix layout, the pdpPairs function generates a generalized pairs partial dependence plot (GPDP) that encompasses univariate partial dependence (with ICE curves) on the diagonal, bivariate partial dependence on the upper diagonal, and a scatterplot of raw variable values on the lower diagonal, where all colours are assigned to points and ICE curves by the predicted 𝑦̂ value."
+
+
+
+```{r}
+
+set.seed(1892)
+pdpPairs(data = pak, 
+         fit =  ranger.obj, 
+         response = "water", 
+         nmax = 500, 
+         gridSize = 10,         
+         vars = top5,
+         nIce = 100)
+
+```
+
+
+Zenplots may be another option to explore.
+
+
+
+
+
+
+
+
+
+
+
