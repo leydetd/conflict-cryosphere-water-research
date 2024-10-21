@@ -30,8 +30,12 @@ setwd("../r_code/")
 
 
 ```{r}
+# this csv file was used to run the initial model
+#wide = read.csv("../data/pak_water_2024_run/pak_water_complete_df_20241007_v2.csv")
 
-wide = read.csv("../data/pak_water_2024_run/pak_water_complete_df_20241007_v2.csv")
+# this csv file contains the v3 preprocessing (landcover counts were removed; nightlights v22/v21 were aggregated accordingly)
+
+wide = read.csv("../data/pak_water_2024_run/pak_water_complete_df_20241021_v3_run3_preprocessing.csv")
 
 str(wide)
 
@@ -43,7 +47,11 @@ library(tidyverse)
 
 # convert each column (except the first one - admin2) to numeric
 
-wide[ ,2:310] <- sapply(wide[,2:310], as.numeric)
+# run 1 and 2
+#wide[ ,2:310] <- sapply(wide[,2:310], as.numeric)
+
+# run 3 data
+wide[ ,2:309] <- sapply(wide[,2:309], as.numeric)
 
 #check
 str(wide)
@@ -112,7 +120,7 @@ long.mf = as.data.frame(long.mf)
 
 # remove the admin2 for missForest to run correctly. We will add this back after the imputation
 long.mf.no.admin2 = long.mf %>% 
-  select(-admin2)
+  dplyr::select(-admin2)
 
 #check
 str(long.mf.no.admin2)
@@ -158,18 +166,19 @@ lines(density(long.impute$ximp$total), col = "red", lty = 2)
 ```
 
 ```{r}
+# loop function attempts
 
-density.plot = function(x){
-  plot(density(long$x, na.rm=TRUE))
-lines(density(long.impute$ximp$x), col = "red", lty = 2)
-}
+#density.plot = function(x){
+  #plot(density(long$x, na.rm=TRUE))
+#lines(density(long.impute$ximp$x), col = "red", lty = 2)
+#}
 
-lapply(names(long.mf.no.admin2), density.plot)
+#lapply(names(long.mf.no.admin2), density.plot)
 
-for (i in colnames(long.mf.no.admin2)){
-  plot(density(long$[[i]], na.rm=TRUE))
-  lines(density(long.impute$ximp$[[i]]), col = "red", lty = 2)
-}
+#for (i in colnames(long.mf.no.admin2)){
+ # plot(density(long$[[i]], na.rm=TRUE))
+  #lines(density(long.impute$ximp$[[i]]), col = "red", lty = 2)
+#}
 
 ```
 
@@ -186,7 +195,7 @@ long_imp_long <- long_imp |>
 
 # create a long df for the raw data
 long_raw_long <- long.mf |>
-  select(!admin2) |>
+  dplyr::select(!admin2) |>
   pivot_longer(cols = names(long.mf[, -1]), names_to = "var") |> # long.mf[,-1] removes the admin2 row
   mutate(imputed = "0")
 
@@ -215,8 +224,11 @@ long.impute.df = long.impute.df %>%
 str(long.impute.df)
 
 # write the df
+# run 1 and 2
 #write.csv(long.impute.df, file = "../data/pak_water_2024_run/pak_water_imputed_df_full_20241010.csv")
 
+# run3
+#write.csv(long.impute.df, file = "../data/pak_water_2024_run/cleaned data/pak_water_imputed_df_full_20241021.csv")
 ```
 
 
