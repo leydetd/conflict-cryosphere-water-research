@@ -1,0 +1,118 @@
+---
+title: "Pakistan Water Alternate Figures"
+author: "David Leydet"
+date: "2024-11-16"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+This code produces additional figures for the Pakistan Water Conflict paper.
+
+
+
+```{r}
+setwd("~/Desktop/University of Utah PhD /Research/r_code/")
+```
+
+
+```{r}
+# load the complete Pakistan water conflict csv
+
+p = read.csv("../data/pak_water_2024_run/pak_water_con_total_2010_2023_20240911.csv")
+```
+
+
+```{r}
+# temporal plot of total water conflicts in Pakistan from 2010 - 2023
+library(ggplot2) #plotting
+library(janitor) #tabyl function
+library(tidyverse)
+library(hrbrthemes) #ggplot themes
+
+p.table = tabyl(p, year)
+
+p.table = p.table %>% 
+  mutate("Number of Conflicts" = n) %>% 
+  mutate("Percent" = percent)
+
+str(p.table)
+
+```
+
+
+
+
+```{r}
+# fatality count
+
+deaths = aggregate(fatalities ~ year, p, sum)
+
+str(deaths)
+```
+
+
+
+```{r}
+# add deaths to the plot
+
+# remove NA from p.table
+p.table = p.table[-15,]
+
+p.table$deaths = deaths$fatalities
+
+```
+
+```{r}
+# plot
+
+plot = ggplot(p.table, aes(x = year, y = n)) +
+  geom_line(color="#69b3a2", size=1.3, alpha=0.9, linetype=1) +
+  xlab("Year") +
+  ylab("Number of Water Conflicts") +
+  scale_x_continuous(n.breaks = 13) +
+  theme_ipsum() +
+  ggtitle("Pakistan's Subnational Water Conflicts (2010-2023)") +
+  geom_label(
+    aes(label = n),
+    nudge_x = 0.25,
+    nudge_y = 0.25,
+    check_overlap = TRUE)
+
+plot
+  
+```
+
+```{r}
+# fatalities plot
+
+plot2 = ggplot(p.table, aes(x = year, y = deaths)) +
+  geom_line(color="firebrick3", size=1.3, alpha=0.9, linetype=1) +
+  xlab("Year") +
+  ylab("Number of Fatalities") +
+  scale_x_continuous(n.breaks = 13) +
+  theme_ipsum() +
+  ggtitle("Pakistan's Subnational Water Conflict Fatalities (2010-2023)") +
+  geom_label(
+    aes(label = deaths),
+    nudge_x = 0.25,
+    nudge_y = 0.25,
+    check_overlap = TRUE)
+
+plot2
+```
+
+```{r}
+library(ggpubr)
+
+ggarrange(plot, plot2, nrow = 1, ncol = 2)
+```
+
+
