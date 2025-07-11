@@ -1,0 +1,342 @@
+---
+title: "Pakistan Conflict Modeling with iml Package"
+author: "David Leydet"
+date: "2025-06-05"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    theme: bootstrap
+    df_print: paged
+   
+---
+
+
+This file runs the Pakistan conflict data through a random forest using the iml package. This was completed to address reviewer comments from the Weather, Climate, and Society journal.  
+
+
+
+# **Data**
+
+```{r}
+
+#set working directory
+
+setwd("../r_code/")
+
+
+```
+
+
+```{r}
+
+library(dplyr)
+
+# read in data
+
+data = read.csv("../cleaned_data/pakistan_conflict_data_20250604.csv")
+
+# remove the X column
+
+data = data |>
+  dplyr::select(-c(X, log.total.con.percapita)) %>% 
+  mutate(log.con.percapita = log(((data$total.con+1) / data$pop)*10000)) %>% 
+  mutate(total.con.pertenthousand = data$total.con.percapita*10000)
+
+# check
+str(data)
+
+```
+
+# **Data Viz**
+
+```{r}
+
+```
+
+
+
+# **Model**
+
+```{r, messages=FALSE}
+# load iml and random forest packages
+
+library(iml)
+library(randomForest)
+
+```
+
+
+
+```{r}
+
+# subset the data to include the variables that you want to examine 
+
+variables = c("districts", "year", "spei", "pop", "dep.index", "built", "temp.jan", "temp.apr", "temp.jul", "temp.oct", "precip.jan", "precip.apr", "precip.jul", "precip.oct", "log.con.percapita")
+
+data_subset = data %>% 
+  select(all_of(variables))
+
+#check
+
+str(data_subset)
+
+```
+
+
+```{r correlation plot}
+# variable correlation plot
+library(ggcorrplot)
+
+data2 = data %>% 
+  select("year", "spei", "pop", "dep.index", "built", "temp.jan", "temp.apr", "temp.jul", "temp.oct", "precip.jan", "precip.apr", "precip.jul", "precip.oct", "log.con.percapita", "total.con")
+
+ggcorrplot(cor(data2),
+           method = "square",
+           type = "lower",
+           lab = TRUE)
+
+```
+
+
+```{r}
+
+# train the random forest
+
+set.seed(9371)
+
+rf = randomForest(log.con.percapita ~ ., data = data_subset, ntree = 100)
+
+
+```
+
+
+# **iml predictor container**
+
+```{r}
+
+## Create a dataframe that has all of the features except the target
+
+x = data_subset[which(names(data_subset) != "log.con.percapita")]
+
+## Store the data and target in the Predictor() container
+## parameters are the model - in this case rf
+## the data - in this case the new data frame without target - x
+## and the target 
+
+predictor = Predictor$new(model = rf,
+                          data = x,
+                          y = data_subset$log.con.percapita)
+```
+
+
+
+# **Feature Importance**
+
+
+```{r, message=FALSE}
+
+## Store the features in a FeatureImp object
+## loss argument specifies the performance measure for error
+
+imp = FeatureImp$new(predictor = predictor,
+                     loss = "rmse")
+
+```
+
+
+
+```{r}
+
+## Visualize the importance using ggplot2
+library(ggplot2)
+
+##Plot
+plot(imp)
+
+
+```
+
+
+```{r}
+
+# view importance results
+
+imp$results
+
+```
+
+
+# **Feature Effects**
+
+
+
+```{r, message=FALSE}
+
+# Partial Dependence Plots
+# population 
+
+rf.pop = Partial$new(predictor = predictor,
+                        feature = "pop",
+                        aggregation = "pdp",
+                        ice = TRUE)
+
+```
+
+
+```{r}
+
+# center (this centers the impact of y hat on a starting value)
+# in this case it centers it at the minimum value for and the curve is the deviation from this value
+rf.pop$center(min(data_subset$pop))
+
+# plot
+p1 = plot(rf.pop) + ggtitle("Random Forest Population PDP")
+
+p1
+
+```
+
+
+# **Interactions**
+
+
+```{r}
+##Set up the interactions wrapper
+##Play around with grid.size
+
+interact = Interaction$new(predictor = predictor,
+                           grid.size = 15)
+```
+
+
+```{r}
+
+# visualize
+
+plot(interact)
+```
+
+
+## **vivid Analysis**
+
+```{r}
+# visualization test
+library(vivid)
+
+set.seed(731)
+
+viviRf2  <- vivi(fit = rf, 
+                data = data_subset, #which data frame?
+                response = "log.con.percapita",
+                gridSize = 50,
+                importanceType = "agnostic",
+                nmax = 500,
+                reorder = TRUE,
+                predictFun = NULL,
+                numPerm = 4,
+                showVimpError = FALSE)
+
+
+```
+
+
+### **Heatmap Plot**
+
+From Alan Inglis page - "The viviHeatmap function generates a heatmap that displays variable importance and interactions, with importance values on the diagonal and interaction values on the off-diagonal."
+
+
+```{r}
+# heatmap plot
+
+viviHeatmap(mat = viviRf2,
+            angle = 90, # rotate x-axis labels
+            border = TRUE) # black border around the diagonal elements
+
+```
+
+
+
+### **Network Plot**
+
+"With viviNetwork, a network graph is produced to visualize both importance and interactions."
+
+```{r}
+# network plot
+
+# required packages
+library(network) 
+library(sna)
+library(scales)
+library(intergraph)
+
+#visualize 
+viviNetwork(mat = viviRf2)
+```
+
+
+```{r}
+# remove nodes below a certain threshold
+
+viviNetwork(mat = viviRf2,
+            intThreshold = 0.05, # removes connections if the interaction threshold is below this value
+            removeNode = TRUE) # removes nodes if the connection is below the threshold value
+```
+
+```{r}
+library(lemon)
+
+# extract the first five variables from our matrix to plot
+#top5 <- colnames(viviRf)[1:5]
+top4 = c("pop", "built", "year", "dep.index") 
+
+pdpVars(data = data_subset,
+        fit = rf,
+        response = 'log.con.percapita',
+        vars = top4,
+        nIce = 1000) #number of ice curves plotted
+```
+
+```{r}
+
+# extract the next variables to visualize
+
+next2 = c("temp.apr", "temp.oct") 
+
+pdpVars(data = data_subset,
+        fit = rf,
+        response = 'log.con.percapita',
+        vars = next2,
+        nIce = 1000) #number of ice curves plotted
+```
+
+
+**Generalized PDP Pairs**
+
+"By employing a matrix layout, the pdpPairs function generates a generalized pairs partial dependence plot (GPDP) that encompasses univariate partial dependence (with ICE curves) on the diagonal, bivariate partial dependence on the upper diagonal, and a scatterplot of raw variable values on the lower diagonal, where all colours are assigned to points and ICE curves by the predicted 𝑦̂ value."
+
+
+
+```{r}
+
+set.seed(1976)
+pdpPairs(data = pak2, 
+         fit =  ranger2.obj, 
+         response = "water", 
+         nmax = 500, 
+         gridSize = 10,         
+         vars = top4,
+         nIce = 100)
+
+```
+
+
+
+
+
+
+
+
